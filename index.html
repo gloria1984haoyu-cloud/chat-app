@@ -461,6 +461,49 @@
       flex-shrink: 0; line-height: 1;
     }
     .mem-del:hover { color: #ff6b6b; }
+
+    /* ── Preferences Library ── */
+    .pref-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      background: #1a1a1a;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #ccc;
+    }
+    .pref-badge {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .pref-badge.hobby { background: #1a2a3a; color: #6af; }
+    .pref-badge.opinion { background: #2a1a3a; color: #a6f; }
+    .pref-badge.habit { background: #1a3a2a; color: #6fa; }
+    .pref-badge.feeling { background: #3a2a1a; color: #fa6; }
+    .pref-content { flex: 1; line-height: 1.5; }
+    .pref-del {
+      background: none; border: none; color: #444;
+      cursor: pointer; font-size: 13px; padding: 0 2px;
+      flex-shrink: 0; line-height: 1;
+    }
+    .pref-del:hover { color: #ff6b6b; }
+    #pref-extract-btn {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #aaa;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: center;
+    }
+    #pref-extract-btn:hover { background: #222; color: #e8e8e8; }
+    #pref-extract-btn:disabled { color: #555; cursor: not-allowed; }
+
     #memory-extract-btn {
       background: #1a1a1a;
       border: 1px solid #333;
@@ -623,6 +666,14 @@
     <div id="memory-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
     <div id="memory-list" style="display:flex;flex-direction:column;gap:4px;"></div>
   </div>
+
+  <!-- 偏好库 -->
+  <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
+    <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">偏好库</div>
+    <button id="pref-extract-btn">立即更新偏好</button>
+    <div id="pref-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
+    <div id="pref-list" style="display:flex;flex-direction:column;gap:4px;"></div>
+  </div>
 </div>
 
 <script>
@@ -711,8 +762,278 @@
     } catch {}
   }
 
+  // ── Supabase preferences ──
+  async function sbFetchPreferences() {
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/preferences?select=*&order=created_at.asc`, { headers: sbHeaders() });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch { return null; }
+  }
+  async function sbUpsertPreference(pref) {
+    try {
+      await fetch(`${SB_URL}/rest/v1/preferences`, {
+        method: 'POST',
+        headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify(pref),
+      });
+    } catch {}
+  }
+  async function sbDeletePreference(id) {
+    try {
+      await fetch(`${SB_URL}/rest/v1/preferences?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE', headers: sbHeaders(),
+      });
+    } catch {}
+  }
+
+  // ── 天气/位置/时间 ──
+  let _cachedEnvContext = null;
+  let _envContextExpiry = 0;
+
+  function _fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+  }
+
+  function _wmoToDesc(code) {
+    const map = {
+      0:'晴',1:'大部晴',2:'多云',3:'阴',
+      45:'雾',48:'冻雾',
+      51:'小毛毛雨',53:'毛毛雨',55:'大毛毛雨',
+      61:'小雨',63:'中雨',65:'大雨',
+      71:'小雪',73:'中雪',75:'大雪',77:'冰粒',
+      80:'阵雨',81:'大阵雨',82:'强阵雨',85:'阵雪',86:'大阵雪',
+      95:'雷雨',96:'雷雨夹冰雹',99:'强雷雨夹冰雹',
+    };
+    return map[code] || '未知';
+  }
+
+  async function getEnvContext() {
+    const now = Date.now();
+    if (_cachedEnvContext && now < _envContextExpiry) return _cachedEnvContext;
+
+    const d = new Date();
+    const weekDays = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];
+    const timeStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} ${weekDays[d.getDay()]}`;
+
+    let city = '';
+    let weather = '';
+
+    try {
+      const [geoResult] = await Promise.allSettled([
+        _fetchWithTimeout('https://ipapi.co/json/', 5000)
+      ]);
+
+      if (geoResult.status === 'fulfilled' && geoResult.value.ok) {
+        const geo = await geoResult.value.json();
+        city = geo.city || geo.region || '';
+
+        if (geo.latitude && geo.longitude) {
+          try {
+            const wRes = await _fetchWithTimeout(
+              `https://api.open-meteo.com/v1/forecast?latitude=${geo.latitude}&longitude=${geo.longitude}&current=temperature_2m,weathercode&timezone=auto`,
+              5000
+            );
+            if (wRes.ok) {
+              const wData = await wRes.json();
+              const temp = Math.round(wData.current?.temperature_2m ?? 0);
+              const desc = _wmoToDesc(wData.current?.weathercode);
+              weather = `${desc}，${temp}°C`;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    const parts = [`时间：${timeStr}`];
+    if (city) parts.push(`城市：${city}`);
+    if (weather) parts.push(`天气：${weather}`);
+    _cachedEnvContext = `【当前环境】${parts.join(' | ')}`;
+    _envContextExpiry = now + 30 * 60 * 1000;
+    return _cachedEnvContext;
+  }
+
   let pinnedFiles = []; // [{id, name, content}]
   let memories = []; // [{id, content, importance, created_at, last_mentioned}]
+  let preferences = []; // [{id, content, category, created_at, updated_at}]
+
+  // ── Preferences library ──
+  async function loadPreferences() {
+    const raw = await sbFetchPreferences();
+    if (raw === null) {
+      // Supabase 表不存在，降级到 localStorage
+      preferences = JSON.parse(localStorage.getItem('lc-preferences') || '[]');
+    } else {
+      preferences = raw;
+    }
+    if (preferences.length === 0) await initDefaultPreferences();
+    renderPreferenceList();
+  }
+
+  async function initDefaultPreferences() {
+    const defaults = [
+      { content: '对宇宙和物理学感兴趣', category: 'hobby' },
+      { content: '喜欢深夜安静的氛围', category: 'feeling' },
+      { content: '喜欢听 Gloria 聊她的一天', category: 'habit' },
+    ];
+    for (const d of defaults) {
+      const pref = {
+        id: Date.now().toString() + Math.random().toString(36).slice(2),
+        content: d.content,
+        category: d.category,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      preferences.push(pref);
+      await sbUpsertPreference(pref);
+    }
+    localStorage.setItem('lc-preferences', JSON.stringify(preferences));
+  }
+
+  function renderPreferenceList() {
+    const list = document.getElementById('pref-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (preferences.length === 0) {
+      list.innerHTML = '<div style="font-size:12px;color:#555;text-align:center;padding:8px 0;">暂无偏好</div>';
+      return;
+    }
+    const categoryLabel = { hobby:'爱好', opinion:'看法', habit:'习惯', feeling:'感受' };
+    preferences.forEach(p => {
+      const item = document.createElement('div');
+      item.className = 'pref-item';
+      const badge = document.createElement('span');
+      badge.className = 'pref-badge ' + (p.category || 'hobby');
+      badge.textContent = categoryLabel[p.category] || p.category || '爱好';
+      const content = document.createElement('span');
+      content.className = 'pref-content';
+      content.textContent = p.content;
+      const del = document.createElement('button');
+      del.className = 'pref-del';
+      del.textContent = '×';
+      del.addEventListener('click', async () => {
+        preferences = preferences.filter(x => x.id !== p.id);
+        localStorage.setItem('lc-preferences', JSON.stringify(preferences));
+        await sbDeletePreference(p.id);
+        renderPreferenceList();
+      });
+      item.appendChild(badge);
+      item.appendChild(content);
+      item.appendChild(del);
+      list.appendChild(item);
+    });
+  }
+
+  async function extractPreferences(allMessages) {
+    const btn = document.getElementById('pref-extract-btn');
+    const status = document.getElementById('pref-status');
+    if (btn) btn.disabled = true;
+    if (status) { status.style.color = '#888'; status.textContent = '正在分析偏好…'; }
+
+    const cfg = getConfig();
+    const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
+    const key = cfg.key || oldCfg.key || document.getElementById('cfg-key').value;
+    const base = cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc';
+
+    if (!key) {
+      if (status) { status.style.color = '#ff6b6b'; status.textContent = '需要 API Key'; }
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    const recent = allMessages.slice(-80);
+    const dialogText = recent
+      .filter(m => m.role === 'assistant')
+      .map(m => typeof m.content === 'string' ? m.content : '')
+      .filter(Boolean)
+      .join('\n');
+
+    if (!dialogText.trim()) {
+      if (status) { status.style.color = '#666'; status.textContent = '暂无 AI 回复可分析'; }
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    const extractPrompt = `请从以下 AI 的回复中提取 AI 表达过的兴趣、爱好、看法和感受（即 AI 说"我"时表达的偏好）。
+
+规则：
+- 每条偏好一行，格式：[类别] 偏好内容
+- 类别分四种：hobby（爱好/兴趣）、opinion（看法/观点）、habit（习惯倾向）、feeling（情感偏好）
+- 只提取明确表达的偏好，最多8条
+- 如果没有，返回：无
+
+AI 回复内容：
+${dialogText.slice(0, 3000)}
+
+请直接输出列表，格式：[hobby] 内容 或 [opinion] 内容 等`;
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'x-base-url': base,
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 512,
+          messages: [{ role: 'user', content: extractPrompt }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error?.message || 'API error');
+
+      const text = data.content?.[0]?.text || '';
+      if (text.trim() === '无' || !text.trim()) {
+        if (status) { status.style.color = '#666'; status.textContent = '暂无新偏好'; }
+        if (btn) btn.disabled = false;
+        return;
+      }
+
+      const validCats = ['hobby','opinion','habit','feeling'];
+      const lines = text.split('\n').filter(l => validCats.some(c => l.includes(`[${c}]`)));
+      let added = 0;
+      for (const line of lines) {
+        const catMatch = line.match(/\[(hobby|opinion|habit|feeling)\]/);
+        if (!catMatch) continue;
+        const category = catMatch[1];
+        const content = line.replace(/\[.*?\]/g, '').trim();
+        if (!content) continue;
+        if (preferences.some(p => p.content === content)) continue;
+        const pref = {
+          id: Date.now().toString() + Math.random().toString(36).slice(2),
+          content,
+          category,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        preferences.push(pref);
+        await sbUpsertPreference(pref);
+        added++;
+      }
+      localStorage.setItem('lc-preferences', JSON.stringify(preferences));
+      if (status) { status.style.color = '#4caf50'; status.textContent = added > 0 ? `✓ 新增 ${added} 条偏好` : '✓ 偏好已是最新'; }
+      renderPreferenceList();
+    } catch(e) {
+      if (status) { status.style.color = '#ff6b6b'; status.textContent = '提取失败：' + e.message; }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  async function maybeExtractPreferences() {
+    const last = parseInt(localStorage.getItem('last_pref_extract') || '0');
+    if (Date.now() - last < 24 * 60 * 60 * 1000) return;
+    const sessions = getSessions();
+    let allMessages = [];
+    sessions.forEach(s => { if (Array.isArray(s.messages)) allMessages = allMessages.concat(s.messages); });
+    if (allMessages.filter(m => m.role === 'assistant').length < 3) return;
+    localStorage.setItem('last_pref_extract', Date.now().toString());
+    await extractPreferences(allMessages);
+  }
 
   async function loadFiles() {
     pinnedFiles = await sbFetchFiles();
@@ -1003,6 +1324,11 @@ ${dialogText}
     await loadMemories();
     maybeExtractMemories(); // 异步，不阻塞
 
+    // 加载偏好库
+    await loadPreferences();
+    // 预热环境信息（并行，不阻塞）
+    getEnvContext();
+
     // 再从云端拉取最新数据
     const cloudSessions = await sbFetchSessions();
     if (cloudSessions && cloudSessions.length > 0) {
@@ -1289,6 +1615,14 @@ ${dialogText}
       const memBlock = '【记忆库】以下是关于用户的重要信息，请在对话中自然地参考：\n' + memText;
       system = system ? system + '\n\n' + memBlock : memBlock;
     }
+    if (preferences.length > 0) {
+      const prefText = preferences.map(p => `- ${p.content}`).join('\n');
+      const prefBlock = '【我的偏好】以下是我的兴趣爱好和想法：\n' + prefText;
+      system = system ? system + '\n\n' + prefBlock : prefBlock;
+    }
+    // 注入环境信息到最前面（并行请求，失败静默）
+    const envCtx = await getEnvContext();
+    system = envCtx + '\n\n' + (system || '');
 
     if (!key) {
       appendBubble('assistant', '请先在设置里填写 API Key', -1, true);
@@ -1330,6 +1664,8 @@ ${dialogText}
         appendBubble('assistant', reply, msgs.length, false, [], assistantTs);
         msgs.push({ role: 'assistant', content: reply, timestamp: assistantTs });
         updateSession(currentSessionId, { messages: msgs });
+        // 对话结束后异步提取偏好
+        maybeExtractPreferences();
       }
     } catch (e) {
       typingRow.remove();
@@ -1556,6 +1892,15 @@ ${dialogText}
     let allMessages = [];
     sessions.forEach(s => { if (Array.isArray(s.messages)) allMessages = allMessages.concat(s.messages); });
     await extractMemories(allMessages);
+  });
+
+  // ── Preference extract button ──
+  document.getElementById('pref-extract-btn').addEventListener('click', async () => {
+    const sessions = getSessions();
+    let allMessages = [];
+    sessions.forEach(s => { if (Array.isArray(s.messages)) allMessages = allMessages.concat(s.messages); });
+    localStorage.setItem('last_pref_extract', Date.now().toString());
+    await extractPreferences(allMessages);
   });
 
   // ── Import session from JSON file ──
