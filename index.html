@@ -934,8 +934,8 @@
 
     const cfg = getConfig();
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
-    const key = cfg.key || oldCfg.key || document.getElementById('cfg-key').value;
-    const base = cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc';
+    const key = (cfg.key || oldCfg.key || document.getElementById('cfg-key').value || '').trim();
+    const base = (cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc').trim();
 
     if (!key) {
       if (status) { status.style.color = '#ff6b6b'; status.textContent = '需要 API Key'; }
@@ -1185,8 +1185,8 @@ ${dialogText.slice(0, 3000)}
 
     const cfg = getConfig();
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
-    const key = cfg.key || oldCfg.key || document.getElementById('cfg-key').value;
-    const base = cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc';
+    const key = (cfg.key || oldCfg.key || document.getElementById('cfg-key').value || '').trim();
+    const base = (cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc').trim();
 
     if (!key) {
       if (status) { status.style.color = '#ff6b6b'; status.textContent = '需要 API Key'; }
@@ -1602,9 +1602,9 @@ ${dialogText}
   async function callApi(messages) {
     const cfg = getConfig();
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
-    const key = cfg.key || oldCfg.key || document.getElementById('cfg-key').value;
-    const base = cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc';
-    const model = cfg.model || document.getElementById('cfg-model').value || 'claude-sonnet-4-6';
+    const key = (cfg.key || oldCfg.key || document.getElementById('cfg-key').value || '').trim();
+    const base = (cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc').trim();
+    const model = (cfg.model || document.getElementById('cfg-model').value || 'claude-sonnet-4-6').trim();
     let system = cfg.system || document.getElementById('cfg-system').value || '';
     if (pinnedFiles.length > 0) {
       const filesContext = pinnedFiles.map(f => `【${f.name}】\n${f.content}`).join('\n\n---\n\n');
