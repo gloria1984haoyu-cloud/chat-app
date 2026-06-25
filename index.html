@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>lucian</title>
   <link rel="icon" href="/icon.svg" />
   <link rel="manifest" href="/manifest.json" />
@@ -194,6 +194,7 @@
       font-size: 14px;
       line-height: 1.6;
       max-width: calc(100% - 90px);
+      width: fit-content;
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -1394,7 +1395,10 @@ ${dialogText}
       del.className = 'session-delete';
       del.textContent = '×';
       del.title = '删除';
-      del.addEventListener('click', e => { e.stopPropagation(); deleteSession(s.id); });
+      del.addEventListener('click', e => {
+        e.stopPropagation();
+        if (confirm('确认删除这条对话记录？')) deleteSession(s.id);
+      });
 
       item.appendChild(title);
       item.appendChild(del);
