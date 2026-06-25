@@ -575,7 +575,7 @@
 <div id="sidebar-overlay"></div>
 
 <!-- Custom confirm dialog -->
-<div id="confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:999;align-items:center;justify-content:center;">
+<div id="confirm-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#1e1e1e;border-radius:14px;padding:24px 20px;width:280px;max-width:90vw;text-align:center;">
     <div id="confirm-msg" style="color:#e8e8e8;font-size:15px;margin-bottom:20px;line-height:1.5;"></div>
     <div style="display:flex;gap:10px;">
@@ -1381,6 +1381,8 @@ ${dialogText}
     const overlay = document.getElementById('confirm-overlay');
     document.getElementById('confirm-msg').textContent = msg;
     overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
     const ok = document.getElementById('confirm-ok');
     const cancel = document.getElementById('confirm-cancel');
     const cleanup = () => { overlay.style.display = 'none'; ok.onclick = null; cancel.onclick = null; };
