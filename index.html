@@ -574,6 +574,17 @@
 <!-- Mobile sidebar overlay -->
 <div id="sidebar-overlay"></div>
 
+<!-- Custom confirm dialog -->
+<div id="confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#1e1e1e;border-radius:14px;padding:24px 20px;width:280px;max-width:90vw;text-align:center;">
+    <div id="confirm-msg" style="color:#e8e8e8;font-size:15px;margin-bottom:20px;line-height:1.5;"></div>
+    <div style="display:flex;gap:10px;">
+      <button id="confirm-cancel" style="flex:1;padding:10px;background:#2a2a2a;color:#aaa;border:none;border-radius:8px;font-size:14px;cursor:pointer;">取消</button>
+      <button id="confirm-ok" style="flex:1;padding:10px;background:#ff4d4d;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;">删除</button>
+    </div>
+  </div>
+</div>
+
 <!-- Sidebar -->
 <div id="sidebar">
   <div id="sidebar-header">
@@ -1366,6 +1377,17 @@ ${dialogText}
     }
   }
 
+  function showConfirm(msg, onOk) {
+    const overlay = document.getElementById('confirm-overlay');
+    document.getElementById('confirm-msg').textContent = msg;
+    overlay.style.display = 'flex';
+    const ok = document.getElementById('confirm-ok');
+    const cancel = document.getElementById('confirm-cancel');
+    const cleanup = () => { overlay.style.display = 'none'; ok.onclick = null; cancel.onclick = null; };
+    ok.onclick = () => { cleanup(); onOk(); };
+    cancel.onclick = cleanup;
+  }
+
   function deleteSession(id) {
     const sessions = getSessions().filter(s => s.id !== id);
     saveSessions(sessions);
@@ -1397,7 +1419,7 @@ ${dialogText}
       del.title = '删除';
       del.addEventListener('click', e => {
         e.stopPropagation();
-        if (confirm('确认删除这条对话记录？')) deleteSession(s.id);
+        showConfirm('确认删除这条对话记录？', () => deleteSession(s.id));
       });
 
       item.appendChild(title);
