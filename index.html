@@ -700,6 +700,8 @@
   // ── Supabase config ──
   const SB_URL = 'https://xtyouprikflaumctggxs.supabase.co';
   const SB_KEY = 'sb_publishable_7of0a388w-l2JV8rD3K8rg_3Jh3ZniY';
+  const CLOUD_CONFIG_FILE_ID = '__lucian_cloud_config__';
+  const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
 
   function sbHeaders() {
     return {
@@ -753,6 +755,32 @@
     try {
       await fetch(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}`, {
         method: 'DELETE', headers: sbHeaders(),
+      });
+    } catch {}
+  }
+
+  async function sbFetchCloudConfig() {
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(CLOUD_CONFIG_FILE_ID)}&select=*`, { headers: sbHeaders() });
+      if (!res.ok) return null;
+      const rows = await res.json();
+      if (!rows?.[0]?.content) return null;
+      return JSON.parse(rows[0].content);
+    } catch { return null; }
+  }
+  async function sbUpsertCloudConfig(cfg) {
+    const safeCfg = {
+      base: cfg.base || 'https://ai.aiclick.cc',
+      model: cfg.model || 'claude-sonnet-4-6',
+      system: cfg.system || '',
+      updated_at: Number(cfg._updated_at || Date.now()),
+    };
+    try {
+      await sbUpsertFile({
+        id: CLOUD_CONFIG_FILE_ID,
+        name: CLOUD_CONFIG_FILE_NAME,
+        content: JSON.stringify(safeCfg),
+        created_at: safeCfg.updated_at,
       });
     } catch {}
   }
@@ -1055,7 +1083,7 @@ ${dialogText}
   }
 
   async function loadFiles() {
-    pinnedFiles = await sbFetchFiles();
+    pinnedFiles = (await sbFetchFiles()).filter(f => f.id !== CLOUD_CONFIG_FILE_ID);
     renderFilesList();
   }
 
@@ -1358,9 +1386,48 @@ ${dialogText}
   function getConfig() {
     return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
   }
-  function saveConfig(cfg) {
+  function applyConfigToForm(cfg) {
+    document.getElementById('cfg-key').value = cfg.key || '';
+    document.getElementById('cfg-base').value = cfg.base || 'https://ai.aiclick.cc';
+    document.getElementById('cfg-model').value = cfg.model || 'claude-sonnet-4-6';
+    document.getElementById('cfg-system').value = cfg.system || '';
+  }
+  function saveConfigLocal(cfg) {
     localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
     localStorage.setItem('chat-config', JSON.stringify(cfg));
+  }
+  async function saveConfig(cfg) {
+    const next = { ...cfg, _updated_at: Date.now() };
+    saveConfigLocal(next);
+    await sbUpsertCloudConfig(next);
+  }
+  async function syncConfigFromCloud() {
+    const cfg = getConfig();
+    const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
+    const local = Object.assign({}, oldCfg, cfg);
+    const cloud = await sbFetchCloudConfig();
+    if (!cloud) {
+      if (local.base || local.model || local.system) await sbUpsertCloudConfig({ ...local, _updated_at: Number(local._updated_at || Date.now()) });
+      return local;
+    }
+
+    const localUpdated = Number(local._updated_at || 0);
+    const cloudUpdated = Number(cloud.updated_at || 0);
+    if (cloudUpdated >= localUpdated) {
+      const merged = {
+        ...local,
+        base: cloud.base || local.base || 'https://ai.aiclick.cc',
+        model: cloud.model || local.model || 'claude-sonnet-4-6',
+        system: cloud.system || '',
+        _updated_at: cloudUpdated,
+      };
+      saveConfigLocal(merged);
+      applyConfigToForm(merged);
+      return merged;
+    }
+
+    await sbUpsertCloudConfig(local);
+    return local;
   }
 
   // ── State ──
@@ -1382,10 +1449,8 @@ ${dialogText}
     const cfg = getConfig();
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
     const merged = Object.assign({}, oldCfg, cfg);
-    document.getElementById('cfg-key').value = merged.key || '';
-    document.getElementById('cfg-base').value = merged.base || 'https://ai.aiclick.cc';
-    document.getElementById('cfg-model').value = merged.model || 'claude-sonnet-4-6';
-    document.getElementById('cfg-system').value = merged.system || '';
+    applyConfigToForm(merged);
+    await syncConfigFromCloud();
 
     // 手机端默认折叠侧边栏
     if (window.innerWidth <= 600) {
@@ -1917,14 +1982,14 @@ ${dialogText}
     settingsPanel.classList.toggle('open');
   });
 
-  document.getElementById('save-settings').addEventListener('click', () => {
+  document.getElementById('save-settings').addEventListener('click', async () => {
     const cfg = {
       key: document.getElementById('cfg-key').value,
       base: document.getElementById('cfg-base').value || 'https://ai.aiclick.cc',
       model: document.getElementById('cfg-model').value || 'claude-sonnet-4-6',
       system: document.getElementById('cfg-system').value,
     };
-    saveConfig(cfg);
+    await saveConfig(cfg);
     settingsPanel.classList.remove('open');
   });
 
