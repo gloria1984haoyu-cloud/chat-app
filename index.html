@@ -194,12 +194,20 @@
       font-size: 14px;
       line-height: 1.6;
       max-width: calc(100% - 90px);
-      width: fit-content;
-      white-space: pre-wrap;
-      word-break: break-word;
+      width: auto;
+      min-width: 44px;
+      overflow-wrap: break-word;
+      word-break: normal;
     }
+    .bubble.short { min-width: max-content; }
     .msg-row.user .bubble { background: #212121; }
     .bubble.error { color: #ff6b6b; background: #1a0f0f; }
+    .msg-text {
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+    .bubble.short .msg-text { white-space: nowrap; }
 
     /* ── Message actions ── */
     .msg-actions {
@@ -1547,6 +1555,9 @@ ${dialogText}
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble' + (isError ? ' error' : '');
+    const plainText = typeof content === 'string' ? content : '';
+    const isShortText = plainText.trim().length > 0 && plainText.trim().length <= 8 && !plainText.includes('\n') && imageUrls.length === 0;
+    if (isShortText) bubble.classList.add('short');
     if (imageUrls.length > 0) {
       const imgWrap = document.createElement('div');
       imgWrap.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
@@ -1558,8 +1569,10 @@ ${dialogText}
       });
       bubble.appendChild(imgWrap);
     }
-    const textNode = document.createTextNode(content);
-    bubble.appendChild(textNode);
+    const textEl = document.createElement('div');
+    textEl.className = 'msg-text';
+    textEl.textContent = content;
+    bubble.appendChild(textEl);
 
     if (timestamp) {
       const timeEl = document.createElement('div');
@@ -1611,7 +1624,7 @@ ${dialogText}
   // ── Inline edit ──
   function startEdit(row, bubble, msgIdx) {
     if (isLoading) return;
-    const originalText = bubble.textContent;
+    const originalText = bubble.querySelector('.msg-text')?.textContent || '';
 
     const ta = document.createElement('textarea');
     ta.className = 'edit-textarea';
@@ -1659,8 +1672,10 @@ ${dialogText}
   // ── Message actions ──
   function deleteMsg(msgIdx) {
     if (isLoading) return;
-    truncateAt(msgIdx);
-    removeDomFrom(msgIdx);
+    showConfirm('确认删除这条消息以及后面的对话？', () => {
+      truncateAt(msgIdx);
+      removeDomFrom(msgIdx);
+    });
   }
 
   async function regenMsg(msgIdx) {
@@ -1673,12 +1688,14 @@ ${dialogText}
 
   async function editAndResend(msgIdx, newText) {
     if (isLoading) return;
+    const session = getSession(currentSessionId);
+    const originalTs = session?.messages?.[msgIdx]?.timestamp || Date.now();
     const messages = truncateAt(msgIdx);
     removeDomFrom(msgIdx);
 
     const newIdx = messages.length;
-    appendBubble('user', newText, newIdx);
-    messages.push({ role: 'user', content: newText });
+    appendBubble('user', newText, newIdx, false, [], originalTs);
+    messages.push({ role: 'user', content: newText, timestamp: originalTs });
     updateSession(currentSessionId, { messages });
     await callApi(messages);
   }
