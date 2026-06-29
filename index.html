@@ -1287,6 +1287,51 @@ ${dialogText}
   function saveSessions(sessions) {
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
   }
+  function sessionSortValue(session) {
+    const messages = Array.isArray(session.messages) ? session.messages : [];
+    const last = messages[messages.length - 1];
+    return Number(last?.timestamp || session.created_at || session.id || 0);
+  }
+  function isNewerSession(a, b) {
+    const aMessages = Array.isArray(a.messages) ? a.messages : [];
+    const bMessages = Array.isArray(b.messages) ? b.messages : [];
+    const aTime = sessionSortValue(a);
+    const bTime = sessionSortValue(b);
+    if (aTime !== bTime) return aTime > bTime;
+    return aMessages.length > bMessages.length;
+  }
+  function mergeSessions(localSessions = [], cloudSessions = []) {
+    const byId = new Map();
+    [...cloudSessions, ...localSessions].forEach(session => {
+      if (!session?.id) return;
+      const prev = byId.get(session.id);
+      if (!prev || isNewerSession(session, prev)) byId.set(session.id, session);
+    });
+    return [...byId.values()].sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
+  }
+  async function syncSessionsFromCloud({ writeBack = false, refreshCurrent = true } = {}) {
+    const cloudSessions = await sbFetchSessions();
+    if (!cloudSessions) return false;
+
+    const localSessions = getSessions();
+    const merged = mergeSessions(localSessions, cloudSessions);
+    saveSessions(merged);
+    renderSessionList();
+
+    if (writeBack) {
+      merged.forEach(session => {
+        const cloud = cloudSessions.find(s => s.id === session.id);
+        if (!cloud || isNewerSession(session, cloud)) sbUpsertSession(session);
+      });
+    }
+
+    if (refreshCurrent && currentSessionId && !isLoading) {
+      if (merged.find(s => s.id === currentSessionId)) loadSession(currentSessionId);
+    } else if (!currentSessionId && merged.length > 0) {
+      loadSession(merged[0].id);
+    }
+    return true;
+  }
   function getConfig() {
     return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
   }
@@ -1341,15 +1386,12 @@ ${dialogText}
     // 预热环境信息（并行，不阻塞）
     getEnvContext();
 
-    // 再从云端拉取最新数据
-    const cloudSessions = await sbFetchSessions();
-    if (cloudSessions && cloudSessions.length > 0) {
-      saveSessions(cloudSessions);
-      renderSessionList();
-      if (!currentSessionId || !cloudSessions.find(s => s.id === currentSessionId)) {
-        loadSession(cloudSessions[0].id);
-      }
-    }
+    // 再从云端拉取并合并最新数据。手机和电脑各自有 localStorage，必须以云端为准合并。
+    await syncSessionsFromCloud({ writeBack: true });
+    setInterval(() => syncSessionsFromCloud({ refreshCurrent: document.visibilityState === 'visible' }), 20000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncSessionsFromCloud();
+    });
   }
 
   // ── Session management ──
