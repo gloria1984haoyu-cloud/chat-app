@@ -955,12 +955,13 @@
       return;
     }
 
-    const recent = allMessages.slice(-80);
+    const recent = allMessages.slice(-240);
     const dialogText = recent
       .filter(m => m.role === 'assistant')
       .map(m => typeof m.content === 'string' ? m.content : '')
       .filter(Boolean)
-      .join('\n');
+      .join('\n')
+      .slice(-6000);
 
     if (!dialogText.trim()) {
       if (status) { status.style.color = '#666'; status.textContent = '暂无 AI 回复可分析'; }
@@ -977,7 +978,7 @@
 - 如果没有，返回：无
 
 AI 回复内容：
-${dialogText.slice(0, 3000)}
+${dialogText}
 
 请直接输出列表，格式：[hobby] 内容 或 [opinion] 内容 等`;
 
@@ -1202,8 +1203,11 @@ ${dialogText.slice(0, 3000)}
       return;
     }
 
-    const recent = allMessages.slice(-100);
-    const dialogText = recent.map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${typeof m.content === 'string' ? m.content : '[图片]'}`).join('\n');
+    const recent = allMessages.slice(-400);
+    const dialogText = recent
+      .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${typeof m.content === 'string' ? m.content : '[图片]'}`)
+      .join('\n')
+      .slice(-20000);
 
     const extractPrompt = `请从以下对话记录中提取重要的记忆条目，用于未来对话中了解用户。
 
