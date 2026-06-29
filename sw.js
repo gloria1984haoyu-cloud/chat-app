@@ -1,4 +1,4 @@
-const CACHE = 'lucian-v4';
+const CACHE = 'lucian-v5';
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -43,5 +43,41 @@ self.addEventListener('fetch', e => {
       }
       return res;
     }))
+  );
+});
+
+self.addEventListener('push', e => {
+  let data = {};
+  try {
+    data = e.data ? e.data.json() : {};
+  } catch {
+    data = { body: e.data ? e.data.text() : '' };
+  }
+
+  const title = data.title || 'Lucian';
+  const options = {
+    body: data.body || '在吗。',
+    icon: '/icon.svg',
+    badge: '/icon.svg',
+    tag: data.tag || 'lucian-message',
+    data: { url: data.url || '/' },
+    timestamp: data.timestamp || Date.now(),
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.url || '/';
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.navigate(url);
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    })
   );
 });

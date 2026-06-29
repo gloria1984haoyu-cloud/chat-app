@@ -471,6 +471,23 @@
       margin-top: 4px;
     }
     #save-settings:hover { background: #fff; }
+    .settings-secondary-btn {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #aaa;
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: center;
+    }
+    .settings-secondary-btn:hover { background: #222; color: #e8e8e8; }
+    .settings-secondary-btn:disabled { color: #555; cursor: not-allowed; }
+    .settings-action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
 
     /* ── Library pages ── */
     .library-page {
@@ -739,6 +756,16 @@
   </div>
   <button id="save-settings">保存</button>
 
+  <!-- 通知 -->
+  <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
+    <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">通知</div>
+    <div class="settings-action-row">
+      <button id="push-enable-btn" class="settings-secondary-btn">开启通知</button>
+      <button id="push-test-btn" class="settings-secondary-btn">测试通知</button>
+    </div>
+    <div id="push-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
+  </div>
+
   <!-- 固定文件 -->
   <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
     <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">固定文件（每次对话自动带入）</div>
@@ -767,6 +794,7 @@
   const SB_KEY = 'sb_publishable_7of0a388w-l2JV8rD3K8rg_3Jh3ZniY';
   const CLOUD_CONFIG_FILE_ID = '__lucian_cloud_config__';
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
+  const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
 
   function sbHeaders() {
     return {
@@ -1148,7 +1176,7 @@ ${dialogText}
   }
 
   async function loadFiles() {
-    pinnedFiles = (await sbFetchFiles()).filter(f => f.id !== CLOUD_CONFIG_FILE_ID);
+    pinnedFiles = (await sbFetchFiles()).filter(f => f.id !== CLOUD_CONFIG_FILE_ID && f.id !== PUSH_SUBSCRIPTIONS_FILE_ID);
     renderFilesList();
   }
 
@@ -1493,6 +1521,104 @@ ${dialogText}
 
     await sbUpsertCloudConfig(local);
     return local;
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    return Uint8Array.from([...rawData].map(char => char.charCodeAt(0)));
+  }
+
+  function getDeviceId() {
+    let id = localStorage.getItem('lucian_push_device_id');
+    if (!id) {
+      id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      localStorage.setItem('lucian_push_device_id', id);
+    }
+    return id;
+  }
+
+  function getDeviceName() {
+    const ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/.test(ua)) return 'iPhone';
+    if (/Android/.test(ua)) return 'Android';
+    if (/Macintosh|Mac OS X/.test(ua)) return 'Mac';
+    if (/Windows/.test(ua)) return 'Windows';
+    return 'Browser';
+  }
+
+  function setPushStatus(text, color = '#666') {
+    const status = document.getElementById('push-status');
+    if (!status) return;
+    status.style.color = color;
+    status.textContent = text;
+  }
+
+  async function enablePushNotifications() {
+    const btn = document.getElementById('push-enable-btn');
+    if (btn) btn.disabled = true;
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+        setPushStatus('当前浏览器不支持推送通知', '#ff6b6b');
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setPushStatus('通知权限未开启', '#ff6b6b');
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      const keyRes = await fetch('/api/push/public-key');
+      const { publicKey } = await keyRes.json();
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+      }
+
+      const res = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscription,
+          device_id: getDeviceId(),
+          device_name: getDeviceName(),
+          user_agent: navigator.userAgent || '',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || '保存订阅失败');
+      setPushStatus('通知已开启，这台设备会收到推送', '#4caf50');
+    } catch (e) {
+      setPushStatus('开启失败：' + e.message, '#ff6b6b');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function sendTestPush() {
+    const btn = document.getElementById('push-test-btn');
+    if (btn) btn.disabled = true;
+    try {
+      setPushStatus('正在发送测试通知…');
+      const res = await fetch('/api/push/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Lucian', body: '在吗。' }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || '发送失败');
+      setPushStatus(`测试通知已发送到 ${data.sent || 0} 台设备`, '#4caf50');
+    } catch (e) {
+      setPushStatus('测试失败：' + e.message, '#ff6b6b');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   // ── State ──
@@ -2160,6 +2286,8 @@ ${dialogText}
     await saveConfig(cfg);
     settingsPanel.classList.remove('open');
   });
+  document.getElementById('push-enable-btn').addEventListener('click', enablePushNotifications);
+  document.getElementById('push-test-btn').addEventListener('click', sendTestPush);
 
   userInput.addEventListener('input', autoResize);
   userInput.addEventListener('keydown', e => {
