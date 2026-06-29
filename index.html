@@ -1039,9 +1039,7 @@ ${dialogText.slice(0, 3000)}
   async function maybeExtractPreferences() {
     const last = parseInt(localStorage.getItem('last_pref_extract') || '0');
     if (Date.now() - last < 24 * 60 * 60 * 1000) return;
-    const sessions = getSessions();
-    let allMessages = [];
-    sessions.forEach(s => { if (Array.isArray(s.messages)) allMessages = allMessages.concat(s.messages); });
+    const allMessages = collectAllMessagesChronological();
     if (allMessages.filter(m => m.role === 'assistant').length < 3) return;
     localStorage.setItem('last_pref_extract', Date.now().toString());
     await extractPreferences(allMessages);
@@ -1182,9 +1180,7 @@ ${dialogText.slice(0, 3000)}
   async function maybeExtractMemories() {
     const last = parseInt(localStorage.getItem('last_memory_extract') || '0');
     if (Date.now() - last < 24 * 60 * 60 * 1000) return;
-    const sessions = getSessions();
-    let allMessages = [];
-    sessions.forEach(s => { if (Array.isArray(s.messages)) allMessages = allMessages.concat(s.messages); });
+    const allMessages = collectAllMessagesChronological();
     if (allMessages.length < 5) return;
     await extractMemories(allMessages);
   }
@@ -1283,6 +1279,19 @@ ${dialogText}
 
   function getSessions() {
     return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
+  }
+  function collectAllMessagesChronological() {
+    return getSessions()
+      .flatMap(session => {
+        const messages = Array.isArray(session.messages) ? session.messages : [];
+        const fallbackTime = Number(session.created_at || session.id || 0);
+        return messages.map((message, index) => ({
+          ...message,
+          _sort_ts: Number(message.timestamp || fallbackTime + index),
+        }));
+      })
+      .sort((a, b) => a._sort_ts - b._sort_ts)
+      .map(({ _sort_ts, ...message }) => message);
   }
   function saveSessions(sessions) {
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
@@ -1958,17 +1967,13 @@ ${dialogText}
 
   // ── Memory extract button ──
   document.getElementById('memory-extract-btn').addEventListener('click', async () => {
-    const sessions = getSessions();
-    let allMessages = [];
-    sessions.forEach(s => { if (Array.isArray(s.messages)) allMessages = allMessages.concat(s.messages); });
+    const allMessages = collectAllMessagesChronological();
     await extractMemories(allMessages);
   });
 
   // ── Preference extract button ──
   document.getElementById('pref-extract-btn').addEventListener('click', async () => {
-    const sessions = getSessions();
-    let allMessages = [];
-    sessions.forEach(s => { if (Array.isArray(s.messages)) allMessages = allMessages.concat(s.messages); });
+    const allMessages = collectAllMessagesChronological();
     localStorage.setItem('last_pref_extract', Date.now().toString());
     await extractPreferences(allMessages);
   });
