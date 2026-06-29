@@ -84,8 +84,6 @@
     }
     .library-nav-item:hover { background: #1e1e1e; color: #e8e8e8; }
     .library-nav-item.active { background: #252525; color: #e8e8e8; }
-    .library-nav-icon { width: 18px; text-align: center; color: #777; }
-    .library-nav-item.active .library-nav-icon { color: #e8e8e8; }
 
     #session-list {
       flex: 1;
@@ -681,8 +679,8 @@
   </div>
   <div class="sidebar-section">
     <div class="sidebar-label">资料库</div>
-    <button id="nav-memory" class="library-nav-item"><span class="library-nav-icon">◇</span><span>记忆库</span></button>
-    <button id="nav-preferences" class="library-nav-item"><span class="library-nav-icon">♡</span><span>偏好库</span></button>
+    <button id="nav-memory" class="library-nav-item">记忆库</button>
+    <button id="nav-preferences" class="library-nav-item">偏好库</button>
   </div>
   <div class="sidebar-label" style="padding:12px 16px 2px;">对话</div>
   <div id="session-list"></div>
