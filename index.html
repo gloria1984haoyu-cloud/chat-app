@@ -1165,24 +1165,24 @@ ${dialogText}
     });
   }
 
+  const MEMORY_AUTO_MESSAGE_THRESHOLD = 300;
+
   function updateNextExtractDisplay() {
     const el = document.getElementById('memory-next-extract');
     if (!el) return;
-    const last = parseInt(localStorage.getItem('last_memory_extract') || '0');
-    if (!last) { el.textContent = '从未更新'; return; }
-    const next = last + 24 * 60 * 60 * 1000;
-    const diff = next - Date.now();
-    if (diff <= 0) { el.textContent = '待更新'; return; }
-    const h = Math.floor(diff / 3600000);
-    const min = Math.floor((diff % 3600000) / 60000);
-    el.textContent = `${h}h${min}m后自动更新`;
+    const currentCount = collectAllMessagesChronological().length;
+    const lastCount = parseInt(localStorage.getItem('last_memory_extract_message_count') || '0');
+    const added = currentCount - lastCount;
+    if (!lastCount) { el.textContent = '从未更新'; return; }
+    if (added >= MEMORY_AUTO_MESSAGE_THRESHOLD) { el.textContent = '待更新'; return; }
+    el.textContent = `还差 ${MEMORY_AUTO_MESSAGE_THRESHOLD - added} 条自动更新`;
   }
 
   async function maybeExtractMemories() {
-    const last = parseInt(localStorage.getItem('last_memory_extract') || '0');
-    if (Date.now() - last < 24 * 60 * 60 * 1000) return;
     const allMessages = collectAllMessagesChronological();
     if (allMessages.length < 5) return;
+    const lastCount = parseInt(localStorage.getItem('last_memory_extract_message_count') || '0');
+    if (lastCount && allMessages.length - lastCount < MEMORY_AUTO_MESSAGE_THRESHOLD) return;
     await extractMemories(allMessages);
   }
 
@@ -1243,6 +1243,7 @@ ${dialogText}
       const text = data.content?.[0]?.text || '';
       if (text.trim() === '无' || !text.trim()) {
         localStorage.setItem('last_memory_extract', Date.now().toString());
+        localStorage.setItem('last_memory_extract_message_count', allMessages.length.toString());
         if (status) { status.style.color = '#666'; status.textContent = '暂无新记忆'; }
         if (btn) btn.disabled = false;
         updateNextExtractDisplay();
@@ -1268,6 +1269,7 @@ ${dialogText}
         added++;
       }
       localStorage.setItem('last_memory_extract', Date.now().toString());
+      localStorage.setItem('last_memory_extract_message_count', allMessages.length.toString());
       if (status) { status.style.color = '#4caf50'; status.textContent = added > 0 ? `✓ 新增 ${added} 条记忆` : '✓ 记忆已是最新'; }
       renderMemoryList();
       updateNextExtractDisplay();
