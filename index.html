@@ -88,7 +88,7 @@
     }
     .session-item.active .session-title { color: #e8e8e8; }
 
-    .session-delete {
+    .session-action {
       background: none;
       border: none;
       color: #555;
@@ -99,7 +99,8 @@
       flex-shrink: 0;
       opacity: 0;
     }
-    .session-item:hover .session-delete { opacity: 1; }
+    .session-item:hover .session-action { opacity: 1; }
+    .session-rename:hover { color: #e8e8e8; background: #252525; }
     .session-delete:hover { color: #ff6b6b; background: #2a1a1a; }
 
     /* ── Main area ── */
@@ -1533,6 +1534,19 @@ ${dialogText}
     renderSessionList();
   }
 
+  function renameSession(id, title) {
+    const nextTitle = title.trim().slice(0, 60);
+    if (!nextTitle) return;
+    updateSession(id, { title: nextTitle, title_locked: true });
+    renderSessionList();
+  }
+
+  function promptRenameSession(session) {
+    const nextTitle = window.prompt('重命名对话', session.title || '');
+    if (nextTitle === null) return;
+    renameSession(session.id, nextTitle);
+  }
+
   function renderSessionList() {
     const sessions = getSessions();
     sessionList.innerHTML = '';
@@ -1544,9 +1558,23 @@ ${dialogText}
       const title = document.createElement('span');
       title.className = 'session-title';
       title.textContent = s.title;
+      title.title = '双击重命名';
+      title.addEventListener('dblclick', e => {
+        e.stopPropagation();
+        promptRenameSession(s);
+      });
+
+      const rename = document.createElement('button');
+      rename.className = 'session-action session-rename';
+      rename.textContent = '✎';
+      rename.title = '重命名';
+      rename.addEventListener('click', e => {
+        e.stopPropagation();
+        promptRenameSession(s);
+      });
 
       const del = document.createElement('button');
-      del.className = 'session-delete';
+      del.className = 'session-action session-delete';
       del.textContent = '×';
       del.title = '删除';
       del.addEventListener('click', e => {
@@ -1555,6 +1583,7 @@ ${dialogText}
       });
 
       item.appendChild(title);
+      item.appendChild(rename);
       item.appendChild(del);
       item.addEventListener('click', () => {
         loadSession(s.id);
@@ -1911,7 +1940,7 @@ ${dialogText}
     appendBubble('user', text, msgIdx, false, images.map(i => i.dataUrl), userTs);
     messages.push({ role: 'user', content: userContent, timestamp: userTs });
 
-    if (messages.length === 1) {
+    if (messages.length === 1 && !session.title_locked) {
       updateSession(currentSessionId, { title: text.slice(0, 30), messages });
       renderSessionList();
     } else {
