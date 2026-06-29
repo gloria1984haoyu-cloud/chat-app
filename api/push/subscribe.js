@@ -5,14 +5,11 @@ const SB_KEY = 'sb_publishable_7of0a388w-l2JV8rD3K8rg_3Jh3ZniY';
 const PUSH_FILE_ID = '__lucian_push_subscriptions__';
 const PUSH_FILE_NAME = '.lucian-push-subscriptions.json';
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+function sendJson(res, status, data) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.end(JSON.stringify(data));
 }
 
 function sbHeaders() {
@@ -51,25 +48,27 @@ async function saveSubscriptions(items) {
   });
 }
 
-export default async function handler(req) {
+export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
+    res.statusCode = 204;
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.end();
+    return;
   }
 
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
 
   try {
-    const body = await req.json();
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const subscription = body.subscription;
     if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
-      return json({ error: 'Invalid subscription' }, 400);
+      sendJson(res, 400, { error: 'Invalid subscription' });
+      return;
     }
 
     const now = Date.now();
@@ -86,8 +85,8 @@ export default async function handler(req) {
     next.unshift(nextItem);
     await saveSubscriptions(next.slice(0, 20));
 
-    return json({ ok: true, count: next.length });
+    sendJson(res, 200, { ok: true, count: next.length });
   } catch (e) {
-    return json({ error: e.message }, 500);
+    sendJson(res, 500, { error: e.message });
   }
 }

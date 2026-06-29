@@ -8,14 +8,11 @@ const PUSH_FILE_ID = '__lucian_push_subscriptions__';
 const PUSH_FILE_NAME = '.lucian-push-subscriptions.json';
 const FALLBACK_PUBLIC_KEY = 'BMe3CEiLb3zQR7cKQipgVZIMLIHNC0UIHs5eASiUwxd097_FpnmG-j6dTWHUxr8orWRnwXWBh2chcITM4HBHRfg';
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+function sendJson(res, status, data) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.end(JSON.stringify(data));
 }
 
 function sbHeaders() {
@@ -54,29 +51,36 @@ async function saveSubscriptions(items) {
   });
 }
 
-export default async function handler(req) {
+export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
+    res.statusCode = 204;
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.end();
+    return;
   }
 
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
 
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  if (!privateKey) return json({ error: 'Missing VAPID_PRIVATE_KEY' }, 500);
+  if (!privateKey) {
+    sendJson(res, 500, { error: 'Missing VAPID_PRIVATE_KEY' });
+    return;
+  }
 
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const title = String(body.title || 'Lucian').slice(0, 80);
     const message = String(body.body || '在吗。').slice(0, 180);
     const subscriptions = await fetchSubscriptions();
-    if (subscriptions.length === 0) return json({ ok: false, sent: 0, error: 'No subscriptions' }, 404);
+    if (subscriptions.length === 0) {
+      sendJson(res, 404, { ok: false, sent: 0, error: 'No subscriptions' });
+      return;
+    }
 
     webPush.setVapidDetails(
       process.env.VAPID_SUBJECT || 'mailto:push@chat-app-gloria5.vercel.app',
@@ -110,8 +114,8 @@ export default async function handler(req) {
       await saveSubscriptions(subscriptions.filter(item => !failedEndpoints.has(item.endpoint)));
     }
 
-    return json({ ok: true, sent, total: subscriptions.length, removed: failedEndpoints.size });
+    sendJson(res, 200, { ok: true, sent, total: subscriptions.length, removed: failedEndpoints.size });
   } catch (e) {
-    return json({ error: e.message }, 500);
+    sendJson(res, 500, { error: e.message });
   }
 }
