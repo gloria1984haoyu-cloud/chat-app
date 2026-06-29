@@ -1459,28 +1459,28 @@ ${dialogText}
     if (aTime !== bTime) return aTime > bTime;
     return aMessages.length > bMessages.length;
   }
+  function mergeUnreadState(session, other) {
+    const sessionUnreadUpdated = Number(session.unread_updated_at || 0);
+    const otherUnreadUpdated = Number(other.unread_updated_at || 0);
+    if (otherUnreadUpdated > sessionUnreadUpdated) {
+      return {
+        ...session,
+        unread_count: Number(other.unread_count || 0),
+        unread_updated_at: otherUnreadUpdated,
+      };
+    }
+    if (otherUnreadUpdated === sessionUnreadUpdated && Number(other.unread_count || 0) > Number(session.unread_count || 0)) {
+      return {
+        ...session,
+        unread_count: Number(other.unread_count || 0),
+      };
+    }
+    return session;
+  }
   function mergeSessionState(base, incoming) {
     if (!base) return incoming;
-    if (isNewerSession(incoming, base)) return incoming;
-
-    const baseUnreadUpdated = Number(base.unread_updated_at || 0);
-    const incomingUnreadUpdated = Number(incoming.unread_updated_at || 0);
-    if (incomingUnreadUpdated > baseUnreadUpdated) {
-      return {
-        ...base,
-        unread_count: Number(incoming.unread_count || 0),
-        unread_updated_at: incomingUnreadUpdated,
-      };
-    }
-
-    if (incomingUnreadUpdated === baseUnreadUpdated && Number(incoming.unread_count || 0) > Number(base.unread_count || 0)) {
-      return {
-        ...base,
-        unread_count: Number(incoming.unread_count || 0),
-      };
-    }
-
-    return base;
+    if (isNewerSession(incoming, base)) return mergeUnreadState(incoming, base);
+    return mergeUnreadState(base, incoming);
   }
   function mergeSessions(localSessions = [], cloudSessions = []) {
     const byId = new Map();
@@ -1496,7 +1496,9 @@ ${dialogText}
     if (!cloudSessions) return false;
 
     const localSessions = getSessions();
+    const previousCurrent = localSessions.find(s => s.id === currentSessionId);
     const merged = mergeSessions(localSessions, cloudSessions);
+    const nextCurrent = merged.find(s => s.id === currentSessionId);
     saveSessions(merged);
     renderSessionList();
 
@@ -1508,7 +1510,7 @@ ${dialogText}
     }
 
     if (refreshCurrent && currentView === 'chat' && currentSessionId && !isLoading) {
-      if (merged.find(s => s.id === currentSessionId)) loadSession(currentSessionId);
+      if (nextCurrent && (!previousCurrent || isNewerSession(nextCurrent, previousCurrent))) loadSession(currentSessionId);
     } else if (!currentSessionId && merged.length > 0) {
       loadSession(merged[0].id);
     }
@@ -2148,7 +2150,7 @@ ${dialogText}
     const typingRow = showTyping();
 
     try {
-      const apiMessages = messages.map(({ role, content }) => ({ role, content }));
+      const apiMessages = messages.slice(-80).map(({ role, content }) => ({ role, content }));
       const body = { model, max_tokens: 1024, messages: apiMessages };
       if (system) body.system = system;
 
