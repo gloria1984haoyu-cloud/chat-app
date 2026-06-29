@@ -57,6 +57,36 @@
     }
     #new-chat-btn:hover { background: #222; }
 
+    .sidebar-section {
+      padding: 10px 8px 6px;
+      border-bottom: 1px solid #202020;
+    }
+    .sidebar-label {
+      font-size: 10px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      padding: 0 8px 6px;
+    }
+    .library-nav-item {
+      width: 100%;
+      background: none;
+      border: none;
+      color: #aaa;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .library-nav-item:hover { background: #1e1e1e; color: #e8e8e8; }
+    .library-nav-item.active { background: #252525; color: #e8e8e8; }
+    .library-nav-icon { width: 18px; text-align: center; color: #777; }
+    .library-nav-item.active .library-nav-icon { color: #e8e8e8; }
+
     #session-list {
       flex: 1;
       overflow-y: auto;
@@ -444,6 +474,53 @@
     }
     #save-settings:hover { background: #fff; }
 
+    /* ── Library pages ── */
+    .library-page {
+      width: 100%;
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .library-page-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 8px 0 6px;
+      border-bottom: 1px solid #222;
+    }
+    .library-page-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #e8e8e8;
+      line-height: 1.2;
+    }
+    .library-page-subtitle {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #666;
+      line-height: 1.5;
+    }
+    .library-page-meta {
+      font-size: 11px;
+      color: #555;
+      white-space: nowrap;
+    }
+    .library-page-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-end;
+      flex-shrink: 0;
+    }
+    .library-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
     /* ── Memory Library ── */
     .memory-item {
       display: flex;
@@ -541,6 +618,8 @@
 
       /* Chat area less horizontal padding */
       #chat-area { padding: 16px 12px; gap: 12px; }
+      .library-page-header { align-items: stretch; flex-direction: column; }
+      .library-page-actions { align-items: stretch; }
 
       /* Messages fill more width */
       .msg-row { max-width: 100%; }
@@ -600,6 +679,12 @@
     <span>💖</span>
     <button id="new-chat-btn">+ 新对话</button>
   </div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">资料库</div>
+    <button id="nav-memory" class="library-nav-item"><span class="library-nav-icon">◇</span><span>记忆库</span></button>
+    <button id="nav-preferences" class="library-nav-item"><span class="library-nav-icon">♡</span><span>偏好库</span></button>
+  </div>
+  <div class="sidebar-label" style="padding:12px 16px 2px;">对话</div>
   <div id="session-list"></div>
 </div>
 
@@ -675,25 +760,6 @@
       <input id="import-file" type="file" accept=".json" style="display:none" />
     </label>
     <div id="import-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
-  </div>
-
-  <!-- 记忆库 -->
-  <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">记忆库</div>
-      <div id="memory-next-extract" style="font-size:10px;color:#555;"></div>
-    </div>
-    <button id="memory-extract-btn">立即更新记忆</button>
-    <div id="memory-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
-    <div id="memory-list" style="display:flex;flex-direction:column;gap:4px;"></div>
-  </div>
-
-  <!-- 偏好库 -->
-  <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
-    <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">偏好库</div>
-    <button id="pref-extract-btn">立即更新偏好</button>
-    <div id="pref-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
-    <div id="pref-list" style="display:flex;flex-direction:column;gap:4px;"></div>
   </div>
 </div>
 
@@ -1377,7 +1443,7 @@ ${dialogText}
       });
     }
 
-    if (refreshCurrent && currentSessionId && !isLoading) {
+    if (refreshCurrent && currentView === 'chat' && currentSessionId && !isLoading) {
       if (merged.find(s => s.id === currentSessionId)) loadSession(currentSessionId);
     } else if (!currentSessionId && merged.length > 0) {
       loadSession(merged[0].id);
@@ -1433,6 +1499,7 @@ ${dialogText}
 
   // ── State ──
   let currentSessionId = null;
+  let currentView = 'chat';
   let isLoading = false;
   let pendingImages = []; // [{base64, mediaType, dataUrl}]
 
@@ -1444,6 +1511,8 @@ ${dialogText}
   const sendBtn = document.getElementById('send-btn');
   const settingsPanel = document.getElementById('settings-panel');
   const emptyState = document.getElementById('empty-state');
+  const navMemory = document.getElementById('nav-memory');
+  const navPreferences = document.getElementById('nav-preferences');
 
   // ── Init ──
   async function init() {
@@ -1460,6 +1529,7 @@ ${dialogText}
 
     // 先用本地缓存快速显示
     const localSessions = getSessions();
+    renderLibraryNav();
     renderSessionList();
     if (localSessions.length > 0) loadSession(localSessions[0].id);
 
@@ -1547,12 +1617,81 @@ ${dialogText}
     renameSession(session.id, nextTitle);
   }
 
+  function closeMobileSidebar() {
+    if (window.innerWidth <= 600) {
+      sidebar.classList.add('collapsed');
+      sidebarOverlay.classList.remove('visible');
+    }
+  }
+
+  function renderLibraryNav() {
+    navMemory.classList.toggle('active', currentView === 'memory');
+    navPreferences.classList.toggle('active', currentView === 'preferences');
+  }
+
+  function showMemoryPage() {
+    currentView = 'memory';
+    chatArea.innerHTML = `
+      <div class="library-page">
+        <div class="library-page-header">
+          <div>
+            <div class="library-page-title">记忆库</div>
+            <div class="library-page-subtitle">保存关于你的重要信息。永久记忆会保留，7天记忆过期后会自动清理。</div>
+          </div>
+          <div class="library-page-actions">
+            <button id="memory-extract-btn">立即更新记忆</button>
+            <div id="memory-next-extract" class="library-page-meta"></div>
+          </div>
+        </div>
+        <div id="memory-status" style="font-size:12px;color:#666;min-height:16px;"></div>
+        <div id="memory-list" class="library-list"></div>
+      </div>
+    `;
+    document.getElementById('memory-extract-btn').addEventListener('click', async () => {
+      const allMessages = collectAllMessagesChronological();
+      await extractMemories(allMessages);
+    });
+    renderMemoryList();
+    updateNextExtractDisplay();
+    renderLibraryNav();
+    renderSessionList();
+    closeMobileSidebar();
+  }
+
+  function showPreferencesPage() {
+    currentView = 'preferences';
+    chatArea.innerHTML = `
+      <div class="library-page">
+        <div class="library-page-header">
+          <div>
+            <div class="library-page-title">偏好库</div>
+            <div class="library-page-subtitle">记录 Lucian 在对话里表达过的习惯、看法和感受，让回复更稳定。</div>
+          </div>
+          <div class="library-page-actions">
+            <button id="pref-extract-btn">立即更新偏好</button>
+          </div>
+        </div>
+        <div id="pref-status" style="font-size:12px;color:#666;min-height:16px;"></div>
+        <div id="pref-list" class="library-list"></div>
+      </div>
+    `;
+    document.getElementById('pref-extract-btn').addEventListener('click', async () => {
+      const allMessages = collectAllMessagesChronological();
+      localStorage.setItem('last_pref_extract', Date.now().toString());
+      await extractPreferences(allMessages);
+    });
+    renderPreferenceList();
+    renderLibraryNav();
+    renderSessionList();
+    closeMobileSidebar();
+  }
+
   function renderSessionList() {
     const sessions = getSessions();
     sessionList.innerHTML = '';
     sessions.forEach(s => {
       const item = document.createElement('div');
-      item.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
+      item.className = 'session-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
       item.dataset.id = s.id;
 
       const title = document.createElement('span');
@@ -1587,16 +1726,14 @@ ${dialogText}
       item.appendChild(del);
       item.addEventListener('click', () => {
         loadSession(s.id);
-        if (window.innerWidth <= 600) {
-          sidebar.classList.add('collapsed');
-          sidebarOverlay.classList.remove('visible');
-        }
+        closeMobileSidebar();
       });
       sessionList.appendChild(item);
     });
   }
 
   function loadSession(id) {
+    currentView = 'chat';
     currentSessionId = id;
     const session = getSession(id);
     if (!session) return;
@@ -1608,6 +1745,7 @@ ${dialogText}
       chatArea.scrollTop = chatArea.scrollHeight;
     }
     renderSessionList();
+    renderLibraryNav();
   }
 
   // ── Truncate helpers ──
@@ -1911,6 +2049,7 @@ ${dialogText}
       currentSessionId = s.id;
       renderSessionList();
     }
+    if (currentView !== 'chat') loadSession(currentSessionId);
 
     userInput.value = '';
     autoResize();
@@ -1987,6 +2126,8 @@ ${dialogText}
     const s = createSession();
     loadSession(s.id);
   });
+  navMemory.addEventListener('click', showMemoryPage);
+  navPreferences.addEventListener('click', showPreferencesPage);
 
   const sidebarOverlay = document.getElementById('sidebar-overlay');
 
@@ -2080,19 +2221,6 @@ ${dialogText}
       reader.readAsDataURL(file);
     });
     e.target.value = '';
-  });
-
-  // ── Memory extract button ──
-  document.getElementById('memory-extract-btn').addEventListener('click', async () => {
-    const allMessages = collectAllMessagesChronological();
-    await extractMemories(allMessages);
-  });
-
-  // ── Preference extract button ──
-  document.getElementById('pref-extract-btn').addEventListener('click', async () => {
-    const allMessages = collectAllMessagesChronological();
-    localStorage.setItem('last_pref_extract', Date.now().toString());
-    await extractPreferences(allMessages);
   });
 
   // ── Import session from JSON file ──
