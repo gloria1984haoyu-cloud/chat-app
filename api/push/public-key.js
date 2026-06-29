@@ -1,3 +1,5 @@
+export const config = { regions: ['hkg1'] };
+
 const FALLBACK_PUBLIC_KEY = 'BMe3CEiLb3zQR7cKQipgVZIMLIHNC0UIHs5eASiUwxd097_FpnmG-j6dTWHUxr8orWRnwXWBh2chcITM4HBHRfg';
 
 function json(data, status = 200) {

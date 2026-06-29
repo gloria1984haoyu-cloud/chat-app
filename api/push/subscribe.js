@@ -1,3 +1,5 @@
+export const config = { regions: ['hkg1'] };
+
 const SB_URL = 'https://xtyouprikflaumctggxs.supabase.co';
 const SB_KEY = 'sb_publishable_7of0a388w-l2JV8rD3K8rg_3Jh3ZniY';
 const PUSH_FILE_ID = '__lucian_push_subscriptions__';
