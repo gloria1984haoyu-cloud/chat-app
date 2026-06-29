@@ -115,6 +115,21 @@
       color: #ccc;
     }
     .session-item.active .session-title { color: #e8e8e8; }
+    .session-unread {
+      min-width: 17px;
+      height: 17px;
+      border-radius: 999px;
+      background: #7a2424;
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 5px;
+      font-size: 10px;
+      line-height: 1;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
 
     .session-action {
       background: none;
@@ -1444,12 +1459,35 @@ ${dialogText}
     if (aTime !== bTime) return aTime > bTime;
     return aMessages.length > bMessages.length;
   }
+  function mergeSessionState(base, incoming) {
+    if (!base) return incoming;
+    if (isNewerSession(incoming, base)) return incoming;
+
+    const baseUnreadUpdated = Number(base.unread_updated_at || 0);
+    const incomingUnreadUpdated = Number(incoming.unread_updated_at || 0);
+    if (incomingUnreadUpdated > baseUnreadUpdated) {
+      return {
+        ...base,
+        unread_count: Number(incoming.unread_count || 0),
+        unread_updated_at: incomingUnreadUpdated,
+      };
+    }
+
+    if (incomingUnreadUpdated === baseUnreadUpdated && Number(incoming.unread_count || 0) > Number(base.unread_count || 0)) {
+      return {
+        ...base,
+        unread_count: Number(incoming.unread_count || 0),
+      };
+    }
+
+    return base;
+  }
   function mergeSessions(localSessions = [], cloudSessions = []) {
     const byId = new Map();
     [...cloudSessions, ...localSessions].forEach(session => {
       if (!session?.id) return;
       const prev = byId.get(session.id);
-      if (!prev || isNewerSession(session, prev)) byId.set(session.id, session);
+      byId.set(session.id, mergeSessionState(prev, session));
     });
     return [...byId.values()].sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
   }
@@ -1741,6 +1779,12 @@ ${dialogText}
     renameSession(session.id, nextTitle);
   }
 
+  function markSessionRead(id) {
+    const session = getSession(id);
+    if (!session || !Number(session.unread_count || 0)) return;
+    updateSession(id, { unread_count: 0, unread_updated_at: Date.now() });
+  }
+
   function closeMobileSidebar() {
     if (window.innerWidth <= 600) {
       sidebar.classList.add('collapsed');
@@ -1827,6 +1871,15 @@ ${dialogText}
         promptRenameSession(s);
       });
 
+      const unreadCount = Number(s.unread_count || 0);
+      let unread = null;
+      if (unreadCount > 0) {
+        unread = document.createElement('span');
+        unread.className = 'session-unread';
+        unread.textContent = unreadCount > 9 ? '9+' : unreadCount.toString();
+        unread.title = `${unreadCount} 条未读`;
+      }
+
       const rename = document.createElement('button');
       rename.className = 'session-action session-rename';
       rename.textContent = '✎';
@@ -1846,6 +1899,7 @@ ${dialogText}
       });
 
       item.appendChild(title);
+      if (unread) item.appendChild(unread);
       item.appendChild(rename);
       item.appendChild(del);
       item.addEventListener('click', () => {
@@ -1859,6 +1913,7 @@ ${dialogText}
   function loadSession(id) {
     currentView = 'chat';
     currentSessionId = id;
+    markSessionRead(id);
     const session = getSession(id);
     if (!session) return;
     chatArea.innerHTML = '';
