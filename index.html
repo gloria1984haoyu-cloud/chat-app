@@ -979,7 +979,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-native-thinking-restore';
+  const APP_VERSION = '2026-07-01-thinking-model-fix';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -987,24 +987,24 @@
       tag: '日常推荐',
       hint: '平时聊天最合适，效果、速度和价格比较平衡。',
       use: '平时聊天最推荐，适合大多数日常对话。',
-      thinkingNote: '模型理论上支持自适应思考，但中转站不一定每次都透传。',
+      thinkingNote: '当前实测不透传 Thought process，适合普通聊天。',
       controlNote: '低 / 中 / 高基本不直接控制深度，模型会自己决定想多少。',
-      advice: '想日常使用就选它；如果你主要想看 Thought process，用 Opus 4.6 Thinking 更稳。',
-      thinking: 'adaptive',
+      advice: '想日常使用就选它；想看 Thought process，用 Opus 4.5 Thinking。',
+      thinking: 'unknown',
     },
     {
-      value: 'claude-opus-4-6-thinking',
-      label: 'Opus 4.6 Thinking',
+      value: 'claude-opus-4-5-20251101',
+      label: 'Opus 4.5 Thinking',
       tag: '思考最稳',
-      hint: '最推荐用来看 Thought process，中转站专门提供的 thinking 模型。',
+      hint: '当前实测最稳返回 Thought process，低 / 中 / 高有效。',
       use: '最推荐用来看 Thought process。',
-      thinkingNote: '最稳。中转站专门给了 thinking 名字，说明它就是为思考展示准备的。',
-      controlNote: '走中转站原生 thinking；低 / 中 / 高基本不直接控制深度。',
+      thinkingNote: '实测会返回 thinking block，前端可以稳定展示 Thought process。',
+      controlNote: '低 / 中 / 高有效，会影响 thinking token。',
       advice: '想看思考链就选它。',
-      thinking: 'built-in',
+      thinking: 'budget',
     },
     {
-      value: 'claude-haiku-4-5',
+      value: 'claude-haiku-4-5-20251001',
       label: 'Haiku 4.5',
       tag: '便宜快速',
       hint: '便宜、快，适合轻量聊天，但 Thought process 容易浅。',
@@ -1020,10 +1020,10 @@
       tag: '更强更贵',
       hint: '更强也更贵，适合重要长文和复杂问题。',
       use: '适合重要长文、复杂问题和高质量输出。',
-      thinkingNote: '理论上支持自适应思考，但中转站是否稳定透传要看实际结果。',
+      thinkingNote: '当前实测不透传 Thought process，适合强输出，不适合看思考链。',
       controlNote: '低 / 中 / 高基本不直接控制深度，模型会自己决定想多少。',
       advice: '复杂重要内容可以试；日常聊天没必要一直用。',
-      thinking: 'adaptive',
+      thinking: 'unknown',
     },
     {
       value: 'claude-opus-4-7',
@@ -1031,31 +1031,31 @@
       tag: '更强更贵',
       hint: '更强更贵，定位接近 Opus 4.8，可做备用。',
       use: '偏高质量输出，成本高于 Sonnet。',
-      thinkingNote: '理论上支持自适应思考，但稳定性取决于中转站。',
+      thinkingNote: '当前实测不透传 Thought process，适合普通高质量输出。',
       controlNote: '低 / 中 / 高基本不直接控制深度，模型会自己决定想多少。',
       advice: '可以备用；没有特别原因不用优先选。',
-      thinking: 'adaptive',
+      thinking: 'unknown',
     },
     {
-      value: 'claude-opus-4-5',
-      label: 'Opus 4.5',
-      tag: '旧式思考',
-      hint: '旧式思考模型，低 / 中 / 高会真的影响 thinking token。',
-      use: '旧式思考备用模型。',
-      thinkingNote: '支持旧式 budget thinking，可以用来测试思考链。',
-      controlNote: '低 / 中 / 高有效，会影响 thinking token。',
-      advice: '可以备用测试；现在最推荐的思考模型仍然是 Opus 4.6 Thinking。',
-      thinking: 'budget',
+      value: 'claude-opus-4-6',
+      label: 'Opus 4.6',
+      tag: '强聊天',
+      hint: '比 Sonnet 更强更贵，但当前实测不透传 Thought process。',
+      use: '适合普通高质量聊天，不适合看思考链。',
+      thinkingNote: '当前实测不透传 Thought process。',
+      controlNote: '前端目前不主动给它开 thinking 参数。',
+      advice: '如果你要思考链，选 Opus 4.5 Thinking。',
+      thinking: 'unknown',
     },
     {
-      value: 'claude-sonnet-4-5',
+      value: 'claude-sonnet-4-5-20250929',
       label: 'Sonnet 4.5',
-      tag: '备用',
-      hint: '旧一点的 Sonnet 备用模型，低 / 中 / 高有效但不优先。',
-      use: '旧一点的 Sonnet 备用模型。',
-      thinkingNote: '可以走旧式思考，但既然有 Sonnet 4.6，就不用优先选它。',
+      tag: '思考备用',
+      hint: '这里实际是中转站 Sonnet 4.5 日期版，实测也能返回 Thought process。',
+      use: '思考链备用模型，比 Opus 4.5 Thinking 更适合省一点成本。',
+      thinkingNote: '实测会返回 thinking block。',
       controlNote: '低 / 中 / 高有效，会影响 thinking token。',
-      advice: '除非其他模型不好用，否则暂时不用管它。',
+      advice: '想省一点又要 Thought process，可以选它。',
       thinking: 'budget',
     },
     {
@@ -1071,8 +1071,10 @@
     },
   ];
   const MODEL_ALIASES = {
-    'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
-    'claude-opus-4-6': 'claude-opus-4-6-thinking',
+    'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
+    'claude-opus-4-5': 'claude-opus-4-5-20251101',
+    'claude-sonnet-4-5': 'claude-sonnet-4-5-20250929',
+    'claude-opus-4-6-thinking': 'claude-opus-4-5-20251101',
   };
   const THINKING_BUDGETS = {
     low: 1024,
@@ -1734,7 +1736,7 @@ ${dialogText}
       else if (meta.thinking === 'built-in') hint.textContent = '当前模型最适合 Thought process；低 / 中 / 高基本不直接控制深度。点保存后生效。';
       else if (meta.thinking === 'adaptive') hint.textContent = '当前模型可能支持 Thought process；低 / 中 / 高基本不直接控制深度。点保存后生效。';
       else if (meta.thinking === 'budget') hint.textContent = `当前模型用旧式思考，低 / 中 / 高有效；现在约 ${THINKING_BUDGETS[budget]} thinking tokens。点保存后生效。`;
-      else hint.textContent = '这个模型的 thinking 支持不确定，失败时会自动退回普通回复。点保存后生效。';
+      else hint.textContent = '这个模型当前不稳定透传 Thought process，前端不会主动发送 thinking 参数。点保存后生效。';
     }
   }
   function renderModelOptions(selectedModel) {
