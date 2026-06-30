@@ -2765,6 +2765,7 @@ ${dialogText}
         if (thinkingConfig?.type === 'adaptive' && !parsed.thinking && !retriedWithoutThinking) {
           const retryBody = {
             ...body,
+            system: '最终回复只写一句收到。Thought process 如果可用，单独返回。',
             messages: compactApiMessages,
             thinking: { type: 'adaptive', display: 'summarized' },
             output_config: { effort: 'high' },
@@ -2782,8 +2783,8 @@ ${dialogText}
           });
           const retryData = await retryRes.json();
           if (retryRes.ok && !retryData.error) {
-            data = retryData;
-            parsed = parseClaudeResponse(data);
+            const retryParsed = parseClaudeResponse(retryData);
+            if (retryParsed.thinking) parsed.thinking = retryParsed.thinking;
             retriedForThinking = true;
           }
         }
