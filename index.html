@@ -998,7 +998,7 @@
       hint: '最推荐用来看 Thought process，中转站专门提供的 thinking 模型。',
       use: '最推荐用来看 Thought process。',
       thinkingNote: '最稳。中转站专门给了 thinking 名字，说明它就是为思考展示准备的。',
-      controlNote: '低 / 中 / 高有效，会影响 Thought process 的可用 token。',
+      controlNote: '低 / 中 / 高会影响 effort；如果没返回 Thought process，会自动用最高 effort 重试一次。',
       advice: '想看思考链就选它。',
       thinking: 'built-in',
     },
@@ -1077,6 +1077,11 @@
     low: 1024,
     medium: 2048,
     high: 4096,
+  };
+  const THINKING_EFFORTS = {
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
   };
   const THINKING_STYLE_PROMPT = `Thought process 是单独展示区域，不属于最终回复正文。用户要求“只输出最终回复、不要在回复中包含思考过程或内心独白”时，只约束最终回复正文，不约束这个单独区域。
 Thought process 默认用简体中文，写成第一人称即时内心 OS。只写当下冒出来的私心、情绪、潜台词和注意力落点，不写推理步骤。
@@ -2304,6 +2309,7 @@ ${dialogText}
 
   function getThinkingStatusText(status) {
     if (status === 'fallback') return '本次没有返回 Thought process，接口不支持这次的 thinking 参数，已自动退回普通回复。';
+    if (status === 'retry-missing') return '本次已用 high effort 重试，但接口仍然没有返回 Thought process。说明中转站这次没有透传 thinking block，或当前模型名没有真正启用可见 thinking。';
     if (status === 'missing') return '本次没有返回 Thought process。可能是模型这次没有生成，或中转站没有透传 thinking 内容。';
     return '';
   }
@@ -2519,7 +2525,7 @@ ${dialogText}
     if (!enabled) return null;
     const meta = getModelMeta(model);
     if (meta.thinking === 'unknown') return null;
-    if (meta.thinking === 'budget' || meta.thinking === 'built-in') {
+    if (meta.thinking === 'budget') {
       return {
         type: 'enabled',
         budget_tokens: THINKING_BUDGETS[budget] || THINKING_BUDGETS.low,
@@ -2527,6 +2533,23 @@ ${dialogText}
       };
     }
     return { type: 'adaptive', display: 'summarized' };
+  }
+
+  function buildOutputConfig(model, enabled, budget) {
+    if (!enabled) return null;
+    const meta = getModelMeta(model);
+    if (meta.thinking !== 'adaptive' && meta.thinking !== 'built-in') return null;
+    return { effort: THINKING_EFFORTS[budget] || THINKING_EFFORTS.low };
+  }
+
+  function getThinkingMaxTokens(thinkingConfig, outputConfig, budget) {
+    if (!thinkingConfig) return 1024;
+    if (thinkingConfig.type === 'adaptive') {
+      if (outputConfig?.effort === 'high') return 8192;
+      if (outputConfig?.effort === 'medium') return 4096;
+      return 3072;
+    }
+    return (THINKING_BUDGETS[budget] || THINKING_BUDGETS.low) + 1024;
   }
 
   function parseClaudeContent(content) {
@@ -2608,9 +2631,11 @@ ${dialogText}
       const body = { model, max_tokens: 1024, messages: apiMessages };
       if (system) body.system = system;
       const thinkingConfig = buildThinkingConfig(model, thinkingEnabled, thinkingBudget);
+      const outputConfig = buildOutputConfig(model, thinkingEnabled, thinkingBudget);
       if (thinkingConfig) {
         body.thinking = thinkingConfig;
-        body.max_tokens = Math.max(body.max_tokens, (THINKING_BUDGETS[thinkingBudget] || 1024) + 1024);
+        if (outputConfig) body.output_config = outputConfig;
+        body.max_tokens = Math.max(body.max_tokens, getThinkingMaxTokens(thinkingConfig, outputConfig, thinkingBudget));
       }
 
       let res = await fetch('/api/chat', {
@@ -2625,10 +2650,28 @@ ${dialogText}
       });
       let data = await res.json();
       let retriedWithoutThinking = false;
+      let retriedForThinking = false;
+
+      if (thinkingConfig && body.output_config && (!res.ok || data.error) && shouldRetryWithoutThinking(data)) {
+        const noOutputConfigBody = { ...body };
+        delete noOutputConfigBody.output_config;
+        res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'x-base-url': base,
+          },
+          body: JSON.stringify(noOutputConfigBody),
+        });
+        data = await res.json();
+      }
 
       if (thinkingConfig && (!res.ok || data.error) && shouldRetryWithoutThinking(data)) {
         const plainBody = { ...body };
         delete plainBody.thinking;
+        delete plainBody.output_config;
         plainBody.max_tokens = 1024;
         retriedWithoutThinking = true;
         res = await fetch('/api/chat', {
@@ -2650,9 +2693,33 @@ ${dialogText}
         const errMsg = data.error?.message || JSON.stringify(data);
         appendBubble('assistant', `出错了 (${res.status})：${errMsg}`, -1, true);
       } else {
-        const parsed = parseClaudeContent(data.content);
+        let parsed = parseClaudeContent(data.content);
+        if (thinkingConfig?.type === 'adaptive' && !parsed.thinking && !retriedWithoutThinking) {
+          const retryBody = {
+            ...body,
+            thinking: { type: 'adaptive', display: 'summarized' },
+            output_config: { effort: 'high' },
+            max_tokens: Math.max(body.max_tokens, 8192),
+          };
+          const retryRes = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': key,
+              'anthropic-version': '2023-06-01',
+              'x-base-url': base,
+            },
+            body: JSON.stringify(retryBody),
+          });
+          const retryData = await retryRes.json();
+          if (retryRes.ok && !retryData.error) {
+            data = retryData;
+            parsed = parseClaudeContent(data.content);
+            retriedForThinking = true;
+          }
+        }
         const reply = parsed.text || '';
-        const thinkingStatus = thinkingConfig && !parsed.thinking ? (retriedWithoutThinking ? 'fallback' : 'missing') : '';
+        const thinkingStatus = thinkingConfig && !parsed.thinking ? (retriedWithoutThinking ? 'fallback' : (retriedForThinking ? 'retry-missing' : 'missing')) : '';
         const session = getSession(currentSessionId);
         const msgs = session.messages || [];
         const assistantTs = Date.now();
