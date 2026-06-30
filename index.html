@@ -2561,6 +2561,8 @@ ${dialogText}
       if (block.type === 'text' && block.text) text.push(block.text);
       if ((block.type === 'thinking' || block.type === 'redacted_thinking') && block.thinking) thinking.push(block.thinking);
       if (block.type === 'thinking' && block.summary) thinking.push(block.summary);
+      if ((block.type === 'reasoning' || block.type === 'summary') && block.text) thinking.push(block.text);
+      if ((block.type === 'reasoning' || block.type === 'summary') && block.content) thinking.push(block.content);
       if (block.type === 'thinking' && Array.isArray(block.summaries)) {
         block.summaries.forEach(item => {
           if (typeof item === 'string') thinking.push(item);
@@ -2572,6 +2574,61 @@ ${dialogText}
     return {
       text: text.join('\n\n').trim(),
       thinking: thinking.join('\n\n').trim(),
+    };
+  }
+
+  function collectReasoningText(value, output = []) {
+    if (!value) return output;
+    if (typeof value === 'string') {
+      output.push(value);
+      return output;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(item => collectReasoningText(item, output));
+      return output;
+    }
+    if (typeof value === 'object') {
+      ['thinking', 'reasoning', 'reasoning_content', 'thought', 'thoughts'].forEach(key => {
+        if (value[key]) collectReasoningText(value[key], output);
+      });
+      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.text) output.push(value.text);
+      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.content) collectReasoningText(value.content, output);
+      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.summary) collectReasoningText(value.summary, output);
+      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.summaries) collectReasoningText(value.summaries, output);
+    }
+    return output;
+  }
+
+  function parseClaudeResponse(data) {
+    const parsed = parseClaudeContent(data?.content);
+    if (!parsed.thinking) {
+      const alternateThinking = collectReasoningText({
+        thinking: data?.thinking,
+        reasoning: data?.reasoning,
+        reasoning_content: data?.reasoning_content,
+        choices: data?.choices,
+        output: data?.output,
+      }).join('\n\n').trim();
+      if (alternateThinking) parsed.thinking = alternateThinking;
+    }
+    if (!parsed.text && Array.isArray(data?.choices)) {
+      parsed.text = data.choices.map(choice => choice?.message?.content || choice?.text || '').filter(Boolean).join('\n\n').trim();
+    }
+    return parsed;
+  }
+
+  function getResponseShape(data) {
+    const contentBlocks = Array.isArray(data?.content) ? data.content : [];
+    const firstChoice = Array.isArray(data?.choices) ? data.choices[0] : null;
+    const firstMessage = firstChoice?.message || null;
+    return {
+      top_keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 30) : [],
+      content_types: contentBlocks.map(block => block?.type || typeof block).slice(0, 20),
+      content_keys: contentBlocks.map(block => block && typeof block === 'object' ? Object.keys(block).slice(0, 12) : []).slice(0, 20),
+      choice_keys: firstChoice && typeof firstChoice === 'object' ? Object.keys(firstChoice).slice(0, 20) : [],
+      message_keys: firstMessage && typeof firstMessage === 'object' ? Object.keys(firstMessage).slice(0, 20) : [],
+      model: data?.model || '',
+      stop_reason: data?.stop_reason || data?.stopReason || '',
     };
   }
 
@@ -2693,7 +2750,7 @@ ${dialogText}
         const errMsg = data.error?.message || JSON.stringify(data);
         appendBubble('assistant', `出错了 (${res.status})：${errMsg}`, -1, true);
       } else {
-        let parsed = parseClaudeContent(data.content);
+        let parsed = parseClaudeResponse(data);
         if (thinkingConfig?.type === 'adaptive' && !parsed.thinking && !retriedWithoutThinking) {
           const retryBody = {
             ...body,
@@ -2714,17 +2771,23 @@ ${dialogText}
           const retryData = await retryRes.json();
           if (retryRes.ok && !retryData.error) {
             data = retryData;
-            parsed = parseClaudeContent(data.content);
+            parsed = parseClaudeResponse(data);
             retriedForThinking = true;
           }
         }
         const reply = parsed.text || '';
         const thinkingStatus = thinkingConfig && !parsed.thinking ? (retriedWithoutThinking ? 'fallback' : (retriedForThinking ? 'retry-missing' : 'missing')) : '';
+        const thinkingDebug = thinkingStatus ? {
+          model,
+          thinking_request: thinkingConfig,
+          output_config: body.output_config || null,
+          response_shape: getResponseShape(data),
+        } : null;
         const session = getSession(currentSessionId);
         const msgs = session.messages || [];
         const assistantTs = Date.now();
         appendBubble('assistant', reply, msgs.length, false, [], assistantTs, parsed.thinking, thinkingStatus);
-        msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, thinking_status: thinkingStatus, timestamp: assistantTs });
+        msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, thinking_status: thinkingStatus, thinking_debug: thinkingDebug, timestamp: assistantTs });
         updateSession(currentSessionId, { messages: msgs });
         // 对话结束后异步提取偏好
         maybeExtractPreferences();
