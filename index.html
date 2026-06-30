@@ -217,6 +217,15 @@
       align-items: flex-end;
     }
     .msg-row.user { align-self: flex-end; flex-direction: row-reverse; }
+    .msg-content {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: calc(100% - 90px);
+      min-width: 44px;
+    }
+    .msg-row.user .msg-content { align-items: flex-end; }
+    .msg-row.assistant .msg-content { align-items: flex-start; }
 
     .avatar {
       width: 28px;
@@ -237,7 +246,7 @@
       padding: 10px 14px;
       font-size: 14px;
       line-height: 1.6;
-      max-width: calc(100% - 90px);
+      max-width: 100%;
       width: auto;
       min-width: 44px;
       overflow-wrap: break-word;
@@ -317,42 +326,101 @@
       line-height: 1;
     }
     .msg-row.assistant .msg-time { text-align: left; }
-    .thinking-panel {
-      border: 1px solid #2b2b2b;
-      border-radius: 8px;
-      background: #171717;
-      margin-bottom: 8px;
-      overflow: hidden;
-    }
-    .thinking-toggle {
+    .thought-process {
       width: 100%;
+      color: #aaa;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .thought-toggle {
       border: none;
       background: transparent;
-      color: #9a9a9a;
+      color: #aaa;
       cursor: pointer;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 6px;
       font-size: 12px;
-      padding: 7px 9px;
+      line-height: 1.4;
+      padding: 0;
       text-align: left;
       font-family: inherit;
+      letter-spacing: 0;
     }
-    .thinking-toggle:hover { color: #d8d8d8; background: #1d1d1d; }
-    .thinking-content {
-      border-top: 1px solid #242424;
-      color: #8d8d8d;
+    .thought-toggle:hover { color: #e0e0e0; }
+    .thought-chevron {
+      color: #777;
+      transition: transform .15s ease;
+    }
+    .thought-process.open .thought-chevron { transform: rotate(90deg); }
+    .thought-content {
+      color: #9a9a9a;
       font-size: 12px;
-      line-height: 1.6;
-      padding: 8px 9px 10px;
+      line-height: 1.7;
+      margin-top: 7px;
+      padding-left: 12px;
+      border-left: 1px solid #333;
       white-space: pre-wrap;
       overflow-wrap: break-word;
       max-height: 220px;
       overflow-y: auto;
     }
-    .thinking-panel.collapsed .thinking-content { display: none; }
-    .thinking-panel.collapsed .thinking-chevron { transform: rotate(-90deg); }
-    .thinking-chevron { transition: transform .15s; }
+    .thought-process.collapsed .thought-content { display: none; }
+    .thought-process.mobile .thought-content { display: none; }
+    .thought-sheet-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.48);
+      z-index: 500;
+    }
+    .thought-sheet-overlay.visible { display: block; }
+    .thought-sheet {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: min(58vh, 520px);
+      background: #151515;
+      border-top: 1px solid #2a2a2a;
+      border-radius: 16px 16px 0 0;
+      transform: translateY(100%);
+      transition: transform .2s ease;
+      z-index: 501;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -12px 32px rgba(0,0,0,.35);
+    }
+    .thought-sheet.open { transform: translateY(0); }
+    .thought-sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      color: #cfcfcf;
+      font-size: 14px;
+      border-bottom: 1px solid #232323;
+      flex-shrink: 0;
+    }
+    .thought-sheet-close {
+      border: none;
+      background: transparent;
+      color: #777;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      padding: 2px 4px;
+    }
+    .thought-sheet-close:hover { color: #e8e8e8; }
+    .thought-sheet-body {
+      color: #aaa;
+      font-size: 13px;
+      line-height: 1.75;
+      padding: 16px 18px 24px;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      overflow-y: auto;
+    }
 
     .typing-dots {
       display: flex;
@@ -438,13 +506,21 @@
       border-radius: 10px;
       color: #e8e8e8;
       font-size: 14px;
-      padding: 10px 14px;
+      padding: 8px 14px;
       resize: none;
       outline: none;
       font-family: inherit;
+      min-height: 36px;
       max-height: 160px;
       line-height: 1.5;
+      box-sizing: border-box;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #3a3a3a transparent;
     }
+    #user-input::-webkit-scrollbar { width: 4px; }
+    #user-input::-webkit-scrollbar-track { background: transparent; }
+    #user-input::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 999px; }
     #user-input:focus { border-color: #3a3a3a; }
     #user-input::placeholder { color: #444; }
 
@@ -705,15 +781,15 @@
 
       /* Messages fill more width */
       .msg-row { max-width: 100%; }
+      .msg-content { max-width: calc(100% - 36px); }
       .bubble {
         font-size: 15px;
-        max-width: calc(100% - 70px);
         padding: 10px 13px;
       }
 
       /* Hide avatar on mobile to save space */
       .avatar { display: none; }
-      .bubble { max-width: calc(100% - 36px); }
+      .bubble { max-width: 100%; }
 
       /* Message actions: always show on mobile (no hover) */
       .msg-actions { opacity: 1; }
@@ -753,6 +829,16 @@
       <button id="confirm-ok" style="flex:1;padding:10px;background:#ff4d4d;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;">删除</button>
     </div>
   </div>
+</div>
+
+<!-- Thought process sheet (mobile) -->
+<div id="thought-sheet-overlay" class="thought-sheet-overlay"></div>
+<div id="thought-sheet" class="thought-sheet" aria-hidden="true">
+  <div class="thought-sheet-header">
+    <span>✦ Thought process</span>
+    <button id="thought-sheet-close" class="thought-sheet-close" type="button" aria-label="关闭">×</button>
+  </div>
+  <div id="thought-sheet-body" class="thought-sheet-body"></div>
 </div>
 
 <!-- Sidebar -->
@@ -2154,6 +2240,55 @@ ${dialogText}
     return md + ' ' + hm;
   }
 
+  function isMobileViewport() {
+    return window.matchMedia('(max-width: 600px)').matches;
+  }
+
+  function createThoughtProcess(thinking) {
+    const panel = document.createElement('div');
+    panel.className = 'thought-process collapsed' + (isMobileViewport() ? ' mobile' : '');
+
+    const toggle = document.createElement('button');
+    toggle.className = 'thought-toggle';
+    toggle.type = 'button';
+    toggle.innerHTML = '<span>✦ Thought process</span><span class="thought-chevron">›</span>';
+
+    const thinkingEl = document.createElement('div');
+    thinkingEl.className = 'thought-content';
+    thinkingEl.textContent = thinking;
+
+    toggle.addEventListener('click', () => {
+      if (isMobileViewport()) {
+        openThoughtSheet(thinking);
+        return;
+      }
+      panel.classList.toggle('collapsed');
+      panel.classList.toggle('open', !panel.classList.contains('collapsed'));
+    });
+
+    panel.appendChild(toggle);
+    panel.appendChild(thinkingEl);
+    return panel;
+  }
+
+  function openThoughtSheet(thinking) {
+    const overlay = document.getElementById('thought-sheet-overlay');
+    const sheet = document.getElementById('thought-sheet');
+    const body = document.getElementById('thought-sheet-body');
+    body.textContent = thinking;
+    overlay.classList.add('visible');
+    sheet.classList.add('open');
+    sheet.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeThoughtSheet() {
+    const overlay = document.getElementById('thought-sheet-overlay');
+    const sheet = document.getElementById('thought-sheet');
+    overlay.classList.remove('visible');
+    sheet.classList.remove('open');
+    sheet.setAttribute('aria-hidden', 'true');
+  }
+
   function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '') {
     emptyState.remove();
     const row = document.createElement('div');
@@ -2166,6 +2301,8 @@ ${dialogText}
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble' + (isError ? ' error' : '');
+    const contentWrap = document.createElement('div');
+    contentWrap.className = 'msg-content';
     const plainText = typeof content === 'string' ? content : '';
     const isShortText = plainText.trim().length > 0 && plainText.trim().length <= 8 && !plainText.includes('\n') && imageUrls.length === 0;
     if (isShortText) bubble.classList.add('short');
@@ -2180,25 +2317,6 @@ ${dialogText}
       });
       bubble.appendChild(imgWrap);
     }
-    if (role === 'assistant' && thinking) {
-      const panel = document.createElement('div');
-      panel.className = 'thinking-panel collapsed';
-
-      const toggle = document.createElement('button');
-      toggle.className = 'thinking-toggle';
-      toggle.type = 'button';
-      toggle.innerHTML = '<span>思考</span><span class="thinking-chevron">⌄</span>';
-      toggle.addEventListener('click', () => panel.classList.toggle('collapsed'));
-
-      const thinkingEl = document.createElement('div');
-      thinkingEl.className = 'thinking-content';
-      thinkingEl.textContent = thinking;
-
-      panel.appendChild(toggle);
-      panel.appendChild(thinkingEl);
-      bubble.appendChild(panel);
-    }
-
     const textEl = document.createElement('div');
     textEl.className = 'msg-text';
     textEl.textContent = content;
@@ -2234,7 +2352,9 @@ ${dialogText}
     // DOM order for user (row-reverse): avatar, bubble, actions → visual: actions, bubble, avatar ✓
     // for assistant (normal): avatar, bubble, actions → visual: avatar, bubble, actions ✓
     row.appendChild(avatar);
-    row.appendChild(bubble);
+    if (role === 'assistant' && thinking) contentWrap.appendChild(createThoughtProcess(thinking));
+    contentWrap.appendChild(bubble);
+    row.appendChild(contentWrap);
     row.appendChild(actions);
 
     chatArea.appendChild(row);
@@ -2591,7 +2711,7 @@ ${dialogText}
   // ── Auto-resize textarea ──
   function autoResize() {
     userInput.style.height = 'auto';
-    userInput.style.height = Math.min(userInput.scrollHeight, 160) + 'px';
+    userInput.style.height = Math.max(36, Math.min(userInput.scrollHeight, 160)) + 'px';
   }
 
   // ── Event listeners ──
@@ -2655,6 +2775,8 @@ ${dialogText}
   });
   document.getElementById('push-enable-btn').addEventListener('click', enablePushNotifications);
   document.getElementById('push-test-btn').addEventListener('click', sendTestPush);
+  document.getElementById('thought-sheet-overlay').addEventListener('click', closeThoughtSheet);
+  document.getElementById('thought-sheet-close').addEventListener('click', closeThoughtSheet);
 
   userInput.addEventListener('input', autoResize);
   userInput.addEventListener('keydown', e => {
