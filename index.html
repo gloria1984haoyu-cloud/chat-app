@@ -979,6 +979,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
+  const APP_VERSION = '2026-07-01-thought-compact-retry-v2';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2309,7 +2310,7 @@ ${dialogText}
 
   function getThinkingStatusText(status) {
     if (status === 'fallback') return '本次没有返回 Thought process，接口不支持这次的 thinking 参数，已自动退回普通回复。';
-    if (status === 'retry-missing') return '本次已用 high effort 重试，但接口仍然没有返回 Thought process。说明中转站这次没有透传 thinking block，或当前模型名没有真正启用可见 thinking。';
+    if (status === 'retry-missing') return '本次已用最近 40 条上下文和 high effort 重试，但接口仍然没有返回 Thought process。';
     if (status === 'missing') return '本次没有返回 Thought process。可能是模型这次没有生成，或中转站没有透传 thinking 内容。';
     return '';
   }
@@ -3086,7 +3087,21 @@ ${dialogText}
   // ── PWA Service Worker ──
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      const previousVersion = localStorage.getItem('lucian_app_version');
+      if (previousVersion && previousVersion !== APP_VERSION && window.caches) {
+        caches.keys()
+          .then(keys => Promise.all(keys.filter(key => key.startsWith('lucian-')).map(key => caches.delete(key))))
+          .then(() => {
+            localStorage.setItem('lucian_app_version', APP_VERSION);
+            window.location.reload();
+          })
+          .catch(() => localStorage.setItem('lucian_app_version', APP_VERSION));
+      } else {
+        localStorage.setItem('lucian_app_version', APP_VERSION);
+      }
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+        .then(registration => registration.update())
+        .catch(() => {});
     });
   }
 </script>
