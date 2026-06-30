@@ -676,6 +676,18 @@
       grid-template-columns: 1fr 1fr;
       gap: 8px;
     }
+    .load-older-btn {
+      align-self: center;
+      border: 1px solid #2a2a2a;
+      background: #171717;
+      color: #888;
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-bottom: 4px;
+    }
+    .load-older-btn:hover { background: #202020; color: #ddd; }
 
     /* ── Library pages ── */
     .library-page {
@@ -1006,7 +1018,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-chat-nav';
+  const APP_VERSION = '2026-07-01-fast-mobile-start';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2043,6 +2055,7 @@ ${dialogText}
   }
 
   // ── State ──
+  const MESSAGE_BATCH_SIZE = 120;
   let currentSessionId = null;
   let currentView = 'chat';
   let isLoading = false;
@@ -2066,7 +2079,6 @@ ${dialogText}
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
     const merged = Object.assign({}, oldCfg, cfg);
     applyConfigToForm(merged);
-    await syncConfigFromCloud();
 
     // 手机端默认折叠侧边栏
     if (window.innerWidth <= 600) {
@@ -2078,6 +2090,9 @@ ${dialogText}
     renderLibraryNav();
     renderSessionList();
     if (localSessions.length > 0) loadSession(localSessions[0].id);
+
+    // 配置同步放到首屏渲染之后，避免手机网络慢时先白屏/黑屏等待。
+    syncConfigFromCloud().catch(() => {});
 
     // 加载固定文件
     await loadFiles();
@@ -2308,15 +2323,35 @@ ${dialogText}
     markSessionRead(id);
     const session = getSession(id);
     if (!session) return;
-    chatArea.innerHTML = '';
-    if (session.messages.length === 0) {
-      chatArea.appendChild(emptyState);
-    } else {
-      session.messages.forEach((m, i) => appendBubble(m.role, m.content, i, false, [], m.timestamp || null, m.thinking || ''));
-      chatArea.scrollTop = chatArea.scrollHeight;
-    }
+    renderSessionMessages(session, Math.max(0, (session.messages || []).length - MESSAGE_BATCH_SIZE), false);
     renderSessionList();
     renderLibraryNav();
+  }
+
+  function renderSessionMessages(session, startIndex = 0, preserveScroll = false) {
+    const messages = session.messages || [];
+    const previousHeight = chatArea.scrollHeight;
+    const previousTop = chatArea.scrollTop;
+    chatArea.innerHTML = '';
+    if (messages.length === 0) {
+      chatArea.appendChild(emptyState);
+    } else {
+      if (startIndex > 0) {
+        const olderBtn = document.createElement('button');
+        olderBtn.className = 'load-older-btn';
+        olderBtn.type = 'button';
+        const nextStart = Math.max(0, startIndex - MESSAGE_BATCH_SIZE);
+        olderBtn.textContent = `加载更早消息（还有 ${startIndex} 条）`;
+        olderBtn.addEventListener('click', () => renderSessionMessages(session, nextStart, true));
+        chatArea.appendChild(olderBtn);
+      }
+      messages.slice(startIndex).forEach((m, offset) => {
+        const i = startIndex + offset;
+        appendBubble(m.role, m.content, i, false, [], m.timestamp || null, m.thinking || '', false);
+      });
+      if (preserveScroll) chatArea.scrollTop = chatArea.scrollHeight - previousHeight + previousTop;
+      else chatArea.scrollTop = chatArea.scrollHeight;
+    }
   }
 
   // ── Truncate helpers ──
@@ -2395,7 +2430,7 @@ ${dialogText}
     sheet.setAttribute('aria-hidden', 'true');
   }
 
-  function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '') {
+  function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '', scrollToBottom = true) {
     emptyState.remove();
     const row = document.createElement('div');
     row.className = `msg-row ${role}`;
@@ -2464,7 +2499,7 @@ ${dialogText}
     row.appendChild(actions);
 
     chatArea.appendChild(row);
-    chatArea.scrollTop = chatArea.scrollHeight;
+    if (scrollToBottom) chatArea.scrollTop = chatArea.scrollHeight;
     return bubble;
   }
 
