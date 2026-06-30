@@ -590,6 +590,29 @@
       font-size: 12px;
       line-height: 1.5;
     }
+    .model-info-card {
+      border: 1px solid #272727;
+      border-radius: 8px;
+      background: #171717;
+      padding: 10px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .model-info-title {
+      color: #e2e2e2;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .model-info-line {
+      color: #898989;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .model-info-line strong {
+      color: #b5b5b5;
+      font-weight: 500;
+    }
     .settings-action-row select {
       flex: 1;
       background: #1a1a1a;
@@ -959,58 +982,90 @@
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
-      label: 'claude-sonnet-4-6',
-      tag: '推荐',
-      hint: '日常聊天首选，效果和成本比较平衡。',
+      label: 'Sonnet 4.6',
+      tag: '日常推荐',
+      hint: '平时聊天最合适，效果、速度和价格比较平衡。',
+      use: '平时聊天最推荐，适合大多数日常对话。',
+      thinkingNote: '模型理论上支持自适应思考，但中转站不一定每次都透传。',
+      controlNote: '低 / 中 / 高基本不直接控制深度，模型会自己决定想多少。',
+      advice: '想日常使用就选它；如果你主要想看 Thought process，用 Opus 4.6 Thinking 更稳。',
       thinking: 'adaptive',
     },
     {
       value: 'claude-opus-4-6-thinking',
-      label: 'claude-opus-4-6-thinking',
-      tag: '思考',
-      hint: '中转站单独提供的 thinking 模型，之后接思考展示优先用它。',
+      label: 'Opus 4.6 Thinking',
+      tag: '思考最稳',
+      hint: '最推荐用来看 Thought process，中转站专门提供的 thinking 模型。',
+      use: '最推荐用来看 Thought process。',
+      thinkingNote: '最稳。中转站专门给了 thinking 名字，说明它就是为思考展示准备的。',
+      controlNote: '使用自适应思考，低 / 中 / 高基本不直接控制深度。',
+      advice: '想看思考链就选它。',
       thinking: 'built-in',
     },
     {
       value: 'claude-haiku-4-5',
-      label: 'claude-haiku-4-5',
-      tag: '便宜',
-      hint: '更省额度，适合轻量聊天，复杂表达会弱一点。',
+      label: 'Haiku 4.5',
+      tag: '便宜快速',
+      hint: '便宜、快，适合轻量聊天，但 Thought process 容易浅。',
+      use: '便宜快速，适合轻量聊天。',
+      thinkingNote: '可以走旧式思考，但质量容易浅，可能复述或机械。',
+      controlNote: '低 / 中 / 高有效，会影响 thinking token。',
+      advice: '想省钱随便聊可以选；不要拿它主力调活人感 Thought process。',
       thinking: 'budget',
     },
     {
       value: 'claude-opus-4-8',
-      label: 'claude-opus-4-8',
-      tag: '更强',
-      hint: '更强也更贵，适合重要长文和高难度内容。',
+      label: 'Opus 4.8',
+      tag: '更强更贵',
+      hint: '更强也更贵，适合重要长文和复杂问题。',
+      use: '适合重要长文、复杂问题和高质量输出。',
+      thinkingNote: '理论上支持自适应思考，但中转站是否稳定透传要看实际结果。',
+      controlNote: '低 / 中 / 高基本不直接控制深度，模型会自己决定想多少。',
+      advice: '复杂重要内容可以试；日常聊天没必要一直用。',
       thinking: 'adaptive',
     },
     {
       value: 'claude-opus-4-7',
-      label: 'claude-opus-4-7',
-      tag: '更强',
-      hint: '偏高质量输出，成本高于 Sonnet。',
+      label: 'Opus 4.7',
+      tag: '更强更贵',
+      hint: '更强更贵，定位接近 Opus 4.8，可做备用。',
+      use: '偏高质量输出，成本高于 Sonnet。',
+      thinkingNote: '理论上支持自适应思考，但稳定性取决于中转站。',
+      controlNote: '低 / 中 / 高基本不直接控制深度，模型会自己决定想多少。',
+      advice: '可以备用；没有特别原因不用优先选。',
       thinking: 'adaptive',
     },
     {
       value: 'claude-opus-4-5',
-      label: 'claude-opus-4-5',
-      tag: '旧思考',
-      hint: '支持老式 thinking budget，后面可作为兼容选项。',
+      label: 'Opus 4.5',
+      tag: '旧式思考',
+      hint: '旧式思考模型，低 / 中 / 高会真的影响 thinking token。',
+      use: '旧式思考备用模型。',
+      thinkingNote: '支持旧式 budget thinking，可以用来测试思考链。',
+      controlNote: '低 / 中 / 高有效，会影响 thinking token。',
+      advice: '可以备用测试；现在最推荐的思考模型仍然是 Opus 4.6 Thinking。',
       thinking: 'budget',
     },
     {
       value: 'claude-sonnet-4-5',
-      label: 'claude-sonnet-4-5',
+      label: 'Sonnet 4.5',
       tag: '备用',
-      hint: 'Sonnet 备用模型，优先级低于 claude-sonnet-4-6。',
+      hint: '旧一点的 Sonnet 备用模型，低 / 中 / 高有效但不优先。',
+      use: '旧一点的 Sonnet 备用模型。',
+      thinkingNote: '可以走旧式思考，但既然有 Sonnet 4.6，就不用优先选它。',
+      controlNote: '低 / 中 / 高有效，会影响 thinking token。',
+      advice: '除非其他模型不好用，否则暂时不用管它。',
       thinking: 'budget',
     },
     {
       value: 'claude-fable-5',
-      label: 'claude-fable-5',
+      label: 'Fable 5',
       tag: '未知',
-      hint: '中转站提供的模型名，具体能力以中转站实际转发为准。',
+      hint: '中转站里有这个名字，但背后能力不清楚，暂不建议。',
+      use: '中转站提供的未知模型。',
+      thinkingNote: '具体背后是什么模型不清楚，不能保证 Thought process。',
+      controlNote: '前端目前不主动给它开 thinking 参数。',
+      advice: '先不要拿它来调思考链。',
       thinking: 'unknown',
     },
   ];
@@ -1690,9 +1745,9 @@ ${dialogText}
       const model = normalizeModelName(document.getElementById('cfg-model')?.value || cfg.model);
       const meta = getModelMeta(model);
       if (!enabled) hint.textContent = '关闭后只显示最终回复，不额外消耗 thinking token。点保存后生效。';
-      else if (meta.thinking === 'built-in') hint.textContent = '当前模型是中转站 thinking 专用模型，会请求思考摘要。点保存后生效。';
-      else if (meta.thinking === 'adaptive') hint.textContent = '当前模型使用自适应思考摘要，实际消耗由模型决定。点保存后生效。';
-      else if (meta.thinking === 'budget') hint.textContent = `当前强度约 ${THINKING_BUDGETS[budget]} thinking tokens。点保存后生效。`;
+      else if (meta.thinking === 'built-in') hint.textContent = '当前模型最适合 Thought process；低 / 中 / 高基本不直接控制深度。点保存后生效。';
+      else if (meta.thinking === 'adaptive') hint.textContent = '当前模型可能支持 Thought process；低 / 中 / 高基本不直接控制深度。点保存后生效。';
+      else if (meta.thinking === 'budget') hint.textContent = `当前模型用旧式思考，低 / 中 / 高有效；现在约 ${THINKING_BUDGETS[budget]} thinking tokens。点保存后生效。`;
       else hint.textContent = '这个模型的 thinking 支持不确定，失败时会自动退回普通回复。点保存后生效。';
     }
   }
@@ -1709,7 +1764,16 @@ ${dialogText}
   function updateModelHint(model) {
     const hint = document.getElementById('cfg-model-hint');
     if (!hint) return;
-    hint.textContent = getModelMeta(model).hint;
+    const meta = getModelMeta(model);
+    hint.innerHTML = `
+      <div class="model-info-card">
+        <div class="model-info-title">${meta.label} · ${meta.tag}</div>
+        <div class="model-info-line"><strong>用途：</strong>${meta.use}</div>
+        <div class="model-info-line"><strong>思考：</strong>${meta.thinkingNote}</div>
+        <div class="model-info-line"><strong>低 / 中 / 高：</strong>${meta.controlNote}</div>
+        <div class="model-info-line"><strong>建议：</strong>${meta.advice}</div>
+      </div>
+    `;
   }
   function getSessions() {
     return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
