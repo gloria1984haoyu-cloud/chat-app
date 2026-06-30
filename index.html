@@ -558,12 +558,34 @@
     }
     #settings-panel.open { display: flex; }
 
+    .settings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
     .settings-title {
       font-size: 15px;
       font-weight: 500;
       color: #e8e8e8;
-      margin-bottom: 4px;
     }
+    #close-settings {
+      width: 30px;
+      height: 30px;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      background: #1a1a1a;
+      color: #aaa;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    #close-settings:hover { color: #e8e8e8; background: #222; }
     .setting-row { display: flex; flex-direction: column; gap: 6px; }
     .setting-row label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
 
@@ -907,7 +929,10 @@
 
 <!-- Settings panel -->
 <div id="settings-panel">
-  <div class="settings-title">设置</div>
+  <div class="settings-header">
+    <div class="settings-title">设置</div>
+    <button id="close-settings" type="button" title="关闭设置">×</button>
+  </div>
   <div class="setting-row">
     <label>API KEY</label>
     <input id="cfg-key" type="password" placeholder="sk-..." />
@@ -979,7 +1004,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-thought-os-prompt';
+  const APP_VERSION = '2026-07-01-settings-close';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2815,6 +2840,9 @@ ${dialogText}
   document.getElementById('settings-btn').addEventListener('click', () => {
     settingsPanel.classList.toggle('open');
   });
+  document.getElementById('close-settings').addEventListener('click', () => {
+    settingsPanel.classList.remove('open');
+  });
 
   document.getElementById('cfg-model').addEventListener('change', e => {
     updateModelHint(e.target.value);
@@ -2833,6 +2861,7 @@ ${dialogText}
   });
 
   document.getElementById('save-settings').addEventListener('click', async () => {
+    const saveBtn = document.getElementById('save-settings');
     const cfg = {
       key: document.getElementById('cfg-key').value,
       base: document.getElementById('cfg-base').value || 'https://ai.aiclick.cc',
@@ -2841,8 +2870,16 @@ ${dialogText}
       thinking_budget: normalizeThinkingBudget(document.getElementById('cfg-thinking-budget').value),
       system: document.getElementById('cfg-system').value,
     };
-    await saveConfig(cfg);
-    settingsPanel.classList.remove('open');
+    saveBtn.disabled = true;
+    const originalText = saveBtn.textContent;
+    saveBtn.textContent = '保存中…';
+    try {
+      await saveConfig(cfg);
+      settingsPanel.classList.remove('open');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalText;
+    }
   });
   document.getElementById('push-enable-btn').addEventListener('click', enablePushNotifications);
   document.getElementById('push-test-btn').addEventListener('click', sendTestPush);
