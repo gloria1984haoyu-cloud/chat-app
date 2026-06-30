@@ -1,4 +1,4 @@
-const CACHE = 'lucian-v6';
+const CACHE = 'lucian-v7';
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -57,8 +57,8 @@ self.addEventListener('push', e => {
   const title = data.title || 'Lucian';
   const options = {
     body: data.body || '在吗。',
-    icon: '/icon.svg',
-    badge: '/icon.svg',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     tag: data.tag || 'lucian-message',
     data: { url: data.url || '/' },
     timestamp: data.timestamp || Date.now(),
