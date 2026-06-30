@@ -979,7 +979,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-filter-meta-thought';
+  const APP_VERSION = '2026-07-01-native-thinking-restore';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -999,7 +999,7 @@
       hint: '最推荐用来看 Thought process，中转站专门提供的 thinking 模型。',
       use: '最推荐用来看 Thought process。',
       thinkingNote: '最稳。中转站专门给了 thinking 名字，说明它就是为思考展示准备的。',
-      controlNote: '低 / 中 / 高会影响 effort；如果没返回 Thought process，会自动用最高 effort 重试一次。',
+      controlNote: '走中转站原生 thinking；低 / 中 / 高基本不直接控制深度。',
       advice: '想看思考链就选它。',
       thinking: 'built-in',
     },
@@ -1079,17 +1079,6 @@
     medium: 2048,
     high: 4096,
   };
-  const THINKING_EFFORTS = {
-    low: 'low',
-    medium: 'medium',
-    high: 'high',
-  };
-  const THINKING_STYLE_PROMPT = `Thought process 是单独展示区域，不属于最终回复正文。用户要求“只输出最终回复、不要在回复中包含思考过程或内心独白”时，只约束最终回复正文，不约束这个单独区域。
-Thought process 默认用简体中文，写成第一人称即时内心 OS。只写当下冒出来的私心、情绪、潜台词和注意力落点，不写推理步骤。
-它要更像对用户这句话的私人反应，有保护欲、偏好、吃醋、不爽、心疼或烦躁都可以。不要永远顺从。用户身体不舒服还想做会让自己更难受的事时，要有保护性判断。
-不要复述用户原话来凑内容，不要解释用户话语含义，不要分析用户意图，不要写回复策略。没有复杂判断时就写很短的闪念。
-禁止写元指令、自我校准或角色扮演说明，比如“我需要作为……”“我要扮演……”“保持……风格”“像真实的人”“根据提示词”“我应该回答”“我要自然地回应”。黎川不是在扮演黎川，黎川只是在想。
-最终回复仍保持简体中文，风格自然，不要结构化输出，除非用户明确要求。`;
 
   function sbHeaders() {
     return {
@@ -2270,7 +2259,7 @@ ${dialogText}
     if (session.messages.length === 0) {
       chatArea.appendChild(emptyState);
     } else {
-      session.messages.forEach((m, i) => appendBubble(m.role, m.content, i, false, [], m.timestamp || null, m.thinking || '', m.thinking_status || ''));
+      session.messages.forEach((m, i) => appendBubble(m.role, m.content, i, false, [], m.timestamp || null, m.thinking || ''));
       chatArea.scrollTop = chatArea.scrollHeight;
     }
     renderSessionList();
@@ -2308,17 +2297,9 @@ ${dialogText}
     return window.matchMedia('(max-width: 600px)').matches;
   }
 
-  function getThinkingStatusText(status) {
-    if (status === 'fallback') return '本次没有返回 Thought process，接口不支持这次的 thinking 参数，已自动退回普通回复。';
-    if (status === 'retry-missing') return '本次已尝试单独补取 Thought process，但接口仍然没有返回。';
-    if (status === 'missing') return '本次没有返回 Thought process。可能是模型这次没有生成，或中转站没有透传 thinking 内容。';
-    return '';
-  }
-
-  function createThoughtProcess(thinking, status = '') {
+  function createThoughtProcess(thinking) {
     const panel = document.createElement('div');
     panel.className = 'thought-process collapsed' + (isMobileViewport() ? ' mobile' : '');
-    const displayText = thinking || getThinkingStatusText(status);
 
     const toggle = document.createElement('button');
     toggle.className = 'thought-toggle';
@@ -2327,11 +2308,11 @@ ${dialogText}
 
     const thinkingEl = document.createElement('div');
     thinkingEl.className = 'thought-content';
-    thinkingEl.textContent = displayText;
+    thinkingEl.textContent = thinking;
 
     toggle.addEventListener('click', () => {
       if (isMobileViewport()) {
-        openThoughtSheet(displayText);
+        openThoughtSheet(thinking);
         return;
       }
       panel.classList.toggle('collapsed');
@@ -2361,7 +2342,7 @@ ${dialogText}
     sheet.setAttribute('aria-hidden', 'true');
   }
 
-  function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '', thinkingStatus = '') {
+  function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '') {
     emptyState.remove();
     const row = document.createElement('div');
     row.className = `msg-row ${role}`;
@@ -2424,7 +2405,7 @@ ${dialogText}
     // DOM order for user (row-reverse): avatar, bubble, actions → visual: actions, bubble, avatar ✓
     // for assistant (normal): avatar, bubble, actions → visual: avatar, bubble, actions ✓
     row.appendChild(avatar);
-    if (role === 'assistant' && (thinking || thinkingStatus)) contentWrap.appendChild(createThoughtProcess(thinking, thinkingStatus));
+    if (role === 'assistant' && thinking) contentWrap.appendChild(createThoughtProcess(thinking));
     contentWrap.appendChild(bubble);
     row.appendChild(contentWrap);
     row.appendChild(actions);
@@ -2536,40 +2517,6 @@ ${dialogText}
     return { type: 'adaptive', display: 'summarized' };
   }
 
-  function buildOutputConfig(model, enabled, budget) {
-    if (!enabled) return null;
-    const meta = getModelMeta(model);
-    if (meta.thinking !== 'adaptive' && meta.thinking !== 'built-in') return null;
-    return { effort: THINKING_EFFORTS[budget] || THINKING_EFFORTS.low };
-  }
-
-  function getThinkingMaxTokens(thinkingConfig, outputConfig, budget) {
-    if (!thinkingConfig) return 1024;
-    if (thinkingConfig.type === 'adaptive') {
-      if (outputConfig?.effort === 'high') return 8192;
-      if (outputConfig?.effort === 'medium') return 4096;
-      return 3072;
-    }
-    return (THINKING_BUDGETS[budget] || THINKING_BUDGETS.low) + 1024;
-  }
-
-  function getLastUserText(messages) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role !== 'user') continue;
-      const content = messages[i].content;
-      if (typeof content === 'string') return content;
-      if (Array.isArray(content)) {
-        return content.map(item => item?.text || '').filter(Boolean).join('\n').trim();
-      }
-      return '';
-    }
-    return '';
-  }
-
-  function isMetaThoughtText(text) {
-    return /指令|提示词|系统|测试|任务|上一轮|英文|身份确认|Thought process|生成|我应该|The user|I should|They'?re|respond naturally|conversational tone|asking if|wants to|risqué|suggestive/i.test(String(text || ''));
-  }
-
   function parseClaudeContent(content) {
     const blocks = Array.isArray(content) ? content : [];
     const text = [];
@@ -2592,70 +2539,6 @@ ${dialogText}
     return {
       text: text.join('\n\n').trim(),
       thinking: thinking.join('\n\n').trim(),
-    };
-  }
-
-  function collectReasoningText(value, output = []) {
-    if (!value) return output;
-    if (typeof value === 'string') {
-      output.push(value);
-      return output;
-    }
-    if (Array.isArray(value)) {
-      value.forEach(item => collectReasoningText(item, output));
-      return output;
-    }
-    if (typeof value === 'object') {
-      ['thinking', 'reasoning', 'reasoning_content', 'thought', 'thoughts'].forEach(key => {
-        if (value[key]) collectReasoningText(value[key], output);
-      });
-      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.text) output.push(value.text);
-      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.content) collectReasoningText(value.content, output);
-      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.summary) collectReasoningText(value.summary, output);
-      if ((value.type === 'thinking' || value.type === 'reasoning' || value.type === 'summary') && value.summaries) collectReasoningText(value.summaries, output);
-    }
-    return output;
-  }
-
-  function parseClaudeResponse(data) {
-    const parsed = parseClaudeContent(data?.content);
-    const inlineThoughtMatch = parsed.text.match(/^\s*(?:\*\*)?(?:Thought process|思考|思考过程)(?:\*\*)?\s*[:：]\s*\n?/i);
-    if (inlineThoughtMatch) {
-      const withoutLabel = parsed.text.slice(inlineThoughtMatch[0].length).trim();
-      const parts = withoutLabel.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        parsed.thinking = parts[0];
-        parsed.text = parts.slice(1).join('\n\n').trim();
-      }
-    }
-    if (!parsed.thinking) {
-      const alternateThinking = collectReasoningText({
-        thinking: data?.thinking,
-        reasoning: data?.reasoning,
-        reasoning_content: data?.reasoning_content,
-        choices: data?.choices,
-        output: data?.output,
-      }).join('\n\n').trim();
-      if (alternateThinking) parsed.thinking = alternateThinking;
-    }
-    if (!parsed.text && Array.isArray(data?.choices)) {
-      parsed.text = data.choices.map(choice => choice?.message?.content || choice?.text || '').filter(Boolean).join('\n\n').trim();
-    }
-    return parsed;
-  }
-
-  function getResponseShape(data) {
-    const contentBlocks = Array.isArray(data?.content) ? data.content : [];
-    const firstChoice = Array.isArray(data?.choices) ? data.choices[0] : null;
-    const firstMessage = firstChoice?.message || null;
-    return {
-      top_keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 30) : [],
-      content_types: contentBlocks.map(block => block?.type || typeof block).slice(0, 20),
-      content_keys: contentBlocks.map(block => block && typeof block === 'object' ? Object.keys(block).slice(0, 12) : []).slice(0, 20),
-      choice_keys: firstChoice && typeof firstChoice === 'object' ? Object.keys(firstChoice).slice(0, 20) : [],
-      message_keys: firstMessage && typeof firstMessage === 'object' ? Object.keys(firstMessage).slice(0, 20) : [],
-      model: data?.model || '',
-      stop_reason: data?.stop_reason || data?.stopReason || '',
     };
   }
 
@@ -2696,10 +2579,6 @@ ${dialogText}
     // 注入环境信息到最前面（并行请求，失败静默）
     const envCtx = await getEnvContext();
     system = envCtx + '\n\n' + (system || '');
-    if (thinkingEnabled) {
-      system += '\n\n' + THINKING_STYLE_PROMPT;
-    }
-
     if (!key) {
       appendBubble('assistant', '请先在设置里填写 API Key', -1, true);
       return;
@@ -2712,15 +2591,12 @@ ${dialogText}
 
     try {
       const apiMessages = messages.slice(-80).map(({ role, content }) => ({ role, content }));
-      const compactApiMessages = messages.slice(-20).map(({ role, content }) => ({ role, content }));
       const body = { model, max_tokens: 1024, messages: apiMessages };
       if (system) body.system = system;
       const thinkingConfig = buildThinkingConfig(model, thinkingEnabled, thinkingBudget);
-      const outputConfig = buildOutputConfig(model, thinkingEnabled, thinkingBudget);
       if (thinkingConfig) {
         body.thinking = thinkingConfig;
-        if (outputConfig) body.output_config = outputConfig;
-        body.max_tokens = Math.max(body.max_tokens, getThinkingMaxTokens(thinkingConfig, outputConfig, thinkingBudget));
+        body.max_tokens = Math.max(body.max_tokens, (THINKING_BUDGETS[thinkingBudget] || THINKING_BUDGETS.low) + 1024);
       }
 
       let res = await fetch('/api/chat', {
@@ -2734,31 +2610,11 @@ ${dialogText}
         body: JSON.stringify(body),
       });
       let data = await res.json();
-      let retriedWithoutThinking = false;
-      let retriedForThinking = false;
-
-      if (thinkingConfig && body.output_config && (!res.ok || data.error) && shouldRetryWithoutThinking(data)) {
-        const noOutputConfigBody = { ...body };
-        delete noOutputConfigBody.output_config;
-        res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': key,
-            'anthropic-version': '2023-06-01',
-            'x-base-url': base,
-          },
-          body: JSON.stringify(noOutputConfigBody),
-        });
-        data = await res.json();
-      }
 
       if (thinkingConfig && (!res.ok || data.error) && shouldRetryWithoutThinking(data)) {
         const plainBody = { ...body };
         delete plainBody.thinking;
-        delete plainBody.output_config;
         plainBody.max_tokens = 1024;
-        retriedWithoutThinking = true;
         res = await fetch('/api/chat', {
           method: 'POST',
           headers: {
@@ -2778,74 +2634,13 @@ ${dialogText}
         const errMsg = data.error?.message || JSON.stringify(data);
         appendBubble('assistant', `出错了 (${res.status})：${errMsg}`, -1, true);
       } else {
-        let parsed = parseClaudeResponse(data);
-        if (thinkingConfig?.type === 'adaptive' && !parsed.thinking && !retriedWithoutThinking) {
-          const retryBody = {
-            ...body,
-            system: '最终回复只写一句收到。Thought process 如果可用，单独返回。',
-            messages: compactApiMessages,
-            thinking: { type: 'adaptive', display: 'summarized' },
-            output_config: { effort: 'high' },
-            max_tokens: Math.max(body.max_tokens, 8192),
-          };
-          const retryRes = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': key,
-              'anthropic-version': '2023-06-01',
-              'x-base-url': base,
-            },
-            body: JSON.stringify(retryBody),
-          });
-          const retryData = await retryRes.json();
-          if (retryRes.ok && !retryData.error) {
-            const retryParsed = parseClaudeResponse(retryData);
-            if (retryParsed.thinking) parsed.thinking = retryParsed.thinking;
-            retriedForThinking = true;
-          }
-        }
+        const parsed = parseClaudeContent(data.content);
         const reply = parsed.text || '';
-        const hadMetaThinking = !!parsed.thinking && isMetaThoughtText(parsed.thinking);
-        if (thinkingConfig && (!parsed.thinking || hadMetaThinking) && !retriedWithoutThinking && reply) {
-          const lastUserText = getLastUserText(messages);
-          const visibleThoughtBody = {
-            model,
-            max_tokens: 220,
-            system: '只输出一段可展示的 Thought process 文本。用简体中文，像第一人称即时内心 OS。只写对用户这句话和最终回复的私人反应、情绪、潜台词和注意力落点。不要写推理步骤，不要解释策略，不要复述用户原话。禁止提到指令、提示词、系统、测试、任务、上一轮、英文、身份确认。不要出现“我应该”。只输出文本本身。',
-            messages: [
-              { role: 'user', content: `用户刚说：${lastUserText}\n最终回复：${reply}\n生成 Thought process。` },
-            ],
-          };
-          const visibleThoughtRes = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': key,
-              'anthropic-version': '2023-06-01',
-              'x-base-url': base,
-            },
-            body: JSON.stringify(visibleThoughtBody),
-          });
-          const visibleThoughtData = await visibleThoughtRes.json();
-          if (visibleThoughtRes.ok && !visibleThoughtData.error) {
-            const visibleThoughtParsed = parseClaudeResponse(visibleThoughtData);
-            if (visibleThoughtParsed.text && !isMetaThoughtText(visibleThoughtParsed.text)) parsed.thinking = visibleThoughtParsed.text;
-          }
-        }
-        if (hadMetaThinking && isMetaThoughtText(parsed.thinking)) parsed.thinking = '';
-        const thinkingStatus = thinkingConfig && !parsed.thinking ? (retriedWithoutThinking ? 'fallback' : (retriedForThinking ? 'retry-missing' : 'missing')) : '';
-        const thinkingDebug = thinkingStatus ? {
-          model,
-          thinking_request: thinkingConfig,
-          output_config: body.output_config || null,
-          response_shape: getResponseShape(data),
-        } : null;
         const session = getSession(currentSessionId);
         const msgs = session.messages || [];
         const assistantTs = Date.now();
-        appendBubble('assistant', reply, msgs.length, false, [], assistantTs, parsed.thinking, thinkingStatus);
-        msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, thinking_status: thinkingStatus, thinking_debug: thinkingDebug, timestamp: assistantTs });
+        appendBubble('assistant', reply, msgs.length, false, [], assistantTs, parsed.thinking);
+        msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, timestamp: assistantTs });
         updateSession(currentSessionId, { messages: msgs });
         // 对话结束后异步提取偏好
         maybeExtractPreferences();
