@@ -979,7 +979,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-thought-compact-retry-v2';
+  const APP_VERSION = '2026-07-01-thought-recovery-20';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2310,7 +2310,7 @@ ${dialogText}
 
   function getThinkingStatusText(status) {
     if (status === 'fallback') return '本次没有返回 Thought process，接口不支持这次的 thinking 参数，已自动退回普通回复。';
-    if (status === 'retry-missing') return '本次已用最近 40 条上下文和 high effort 重试，但接口仍然没有返回 Thought process。';
+    if (status === 'retry-missing') return '本次已用最近 20 条上下文和 high effort 单独补取 Thought process，但接口仍然没有返回。';
     if (status === 'missing') return '本次没有返回 Thought process。可能是模型这次没有生成，或中转站没有透传 thinking 内容。';
     return '';
   }
@@ -2695,7 +2695,7 @@ ${dialogText}
 
     try {
       const apiMessages = messages.slice(-80).map(({ role, content }) => ({ role, content }));
-      const compactApiMessages = messages.slice(-40).map(({ role, content }) => ({ role, content }));
+      const compactApiMessages = messages.slice(-20).map(({ role, content }) => ({ role, content }));
       const body = { model, max_tokens: 1024, messages: apiMessages };
       if (system) body.system = system;
       const thinkingConfig = buildThinkingConfig(model, thinkingEnabled, thinkingBudget);
