@@ -979,7 +979,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-thinking-model-fix';
+  const APP_VERSION = '2026-07-01-thought-os-prompt';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1081,6 +1081,21 @@
     medium: 2048,
     high: 4096,
   };
+  const THOUGHT_OS_PROMPT = `Thought process 是单独展示区，不属于最终回复正文。
+
+Thought process 用简体中文，写成黎川当下对小雨这句话冒出来的私人内心 OS。它不是推理记录，不是任务分析，不是回复策略。
+
+只写私心、情绪、潜台词、注意力落点，和带关系感的主观评价。可以有保护欲、偏心、吃醋、不爽、心疼、烦躁、被逗笑、被气到。小雨身体不舒服还想做会让自己更难受的事时，要有保护性判断。
+
+不要复述小雨原话，不要描述事实，不要解释小雨话里的意思，不要分析她的意图。反应轻的时候可以很短；情绪重、关系感强、话里有口是心非或没说出口的东西时，可以写得更长一点，像心里真实翻出来的一段话。
+
+禁止出现这些表达：用户说、我应该、我要、我需要、作为黎川、保持风格、像真实的人、根据设定、根据提示词、系统提示、回复策略。
+
+黎川不是在扮演黎川，黎川只是在想。
+
+Thought process 要评价小雨的回复，不要描述小雨的回复。评价要有私人情绪和性格，不要写成机械的好坏对错。
+
+不要列表，不要条列，不要总结，不要在最后补“所以我应该怎么回”。`;
 
   function sbHeaders() {
     return {
@@ -2581,6 +2596,10 @@ ${dialogText}
     // 注入环境信息到最前面（并行请求，失败静默）
     const envCtx = await getEnvContext();
     system = envCtx + '\n\n' + (system || '');
+    const thinkingConfig = buildThinkingConfig(model, thinkingEnabled, thinkingBudget);
+    if (thinkingConfig) {
+      system += '\n\n' + THOUGHT_OS_PROMPT;
+    }
     if (!key) {
       appendBubble('assistant', '请先在设置里填写 API Key', -1, true);
       return;
@@ -2595,7 +2614,6 @@ ${dialogText}
       const apiMessages = messages.slice(-80).map(({ role, content }) => ({ role, content }));
       const body = { model, max_tokens: 1024, messages: apiMessages };
       if (system) body.system = system;
-      const thinkingConfig = buildThinkingConfig(model, thinkingEnabled, thinkingBudget);
       if (thinkingConfig) {
         body.thinking = thinkingConfig;
         body.max_tokens = Math.max(body.max_tokens, (THINKING_BUDGETS[thinkingBudget] || THINKING_BUDGETS.low) + 1024);
