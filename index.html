@@ -979,7 +979,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-thought-recovery-20';
+  const APP_VERSION = '2026-07-01-visible-thought-fallback';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2310,7 +2310,7 @@ ${dialogText}
 
   function getThinkingStatusText(status) {
     if (status === 'fallback') return '本次没有返回 Thought process，接口不支持这次的 thinking 参数，已自动退回普通回复。';
-    if (status === 'retry-missing') return '本次已用最近 20 条上下文和 high effort 单独补取 Thought process，但接口仍然没有返回。';
+    if (status === 'retry-missing') return '本次已尝试单独补取 Thought process，但接口仍然没有返回。';
     if (status === 'missing') return '本次没有返回 Thought process。可能是模型这次没有生成，或中转站没有透传 thinking 内容。';
     return '';
   }
@@ -2789,6 +2789,33 @@ ${dialogText}
           }
         }
         const reply = parsed.text || '';
+        if (thinkingConfig && !parsed.thinking && !retriedWithoutThinking && reply) {
+          const visibleThoughtBody = {
+            model,
+            max_tokens: 220,
+            system: '你只生成一段可展示的 Thought process 文本。用简体中文，像第一人称即时内心 OS。写私人反应、情绪、潜台词和注意力落点。不要写推理步骤，不要解释策略，不要复述用户原话，不要出现“我应该”。只输出这段文本本身。',
+            messages: [
+              ...compactApiMessages,
+              { role: 'assistant', content: reply },
+              { role: 'user', content: '为上一轮回复生成 Thought process。' },
+            ],
+          };
+          const visibleThoughtRes = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': key,
+              'anthropic-version': '2023-06-01',
+              'x-base-url': base,
+            },
+            body: JSON.stringify(visibleThoughtBody),
+          });
+          const visibleThoughtData = await visibleThoughtRes.json();
+          if (visibleThoughtRes.ok && !visibleThoughtData.error) {
+            const visibleThoughtParsed = parseClaudeResponse(visibleThoughtData);
+            if (visibleThoughtParsed.text) parsed.thinking = visibleThoughtParsed.text;
+          }
+        }
         const thinkingStatus = thinkingConfig && !parsed.thinking ? (retriedWithoutThinking ? 'fallback' : (retriedForThinking ? 'retry-missing' : 'missing')) : '';
         const thinkingDebug = thinkingStatus ? {
           model,
