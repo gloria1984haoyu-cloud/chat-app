@@ -1578,7 +1578,7 @@ ${dialogText}
     const select = document.getElementById('cfg-thinking-budget');
     const hint = document.getElementById('cfg-thinking-hint');
     if (toggle) {
-      toggle.textContent = enabled ? '开启' : '关闭';
+      toggle.textContent = enabled ? '思考已开启' : '思考已关闭';
       toggle.dataset.enabled = enabled ? 'true' : 'false';
     }
     if (select) {
@@ -1588,11 +1588,11 @@ ${dialogText}
     if (hint) {
       const model = normalizeModelName(document.getElementById('cfg-model')?.value || cfg.model);
       const meta = getModelMeta(model);
-      if (!enabled) hint.textContent = '关闭后只显示最终回复，不额外消耗 thinking token。';
-      else if (meta.thinking === 'built-in') hint.textContent = '当前模型是中转站 thinking 专用模型，会请求思考摘要。';
-      else if (meta.thinking === 'adaptive') hint.textContent = '当前模型使用自适应思考摘要，实际消耗由模型决定。';
-      else if (meta.thinking === 'budget') hint.textContent = `当前强度约 ${THINKING_BUDGETS[budget]} thinking tokens。`;
-      else hint.textContent = '这个模型的 thinking 支持不确定，失败时会自动退回普通回复。';
+      if (!enabled) hint.textContent = '关闭后只显示最终回复，不额外消耗 thinking token。点保存后生效。';
+      else if (meta.thinking === 'built-in') hint.textContent = '当前模型是中转站 thinking 专用模型，会请求思考摘要。点保存后生效。';
+      else if (meta.thinking === 'adaptive') hint.textContent = '当前模型使用自适应思考摘要，实际消耗由模型决定。点保存后生效。';
+      else if (meta.thinking === 'budget') hint.textContent = `当前强度约 ${THINKING_BUDGETS[budget]} thinking tokens。点保存后生效。`;
+      else hint.textContent = '这个模型的 thinking 支持不确定，失败时会自动退回普通回复。点保存后生效。';
     }
   }
   function renderModelOptions(selectedModel) {
