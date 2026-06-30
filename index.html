@@ -2273,7 +2273,7 @@ ${dialogText}
     if (session.messages.length === 0) {
       chatArea.appendChild(emptyState);
     } else {
-      session.messages.forEach((m, i) => appendBubble(m.role, m.content, i, false, [], m.timestamp || null, m.thinking || ''));
+      session.messages.forEach((m, i) => appendBubble(m.role, m.content, i, false, [], m.timestamp || null, m.thinking || '', m.thinking_status || ''));
       chatArea.scrollTop = chatArea.scrollHeight;
     }
     renderSessionList();
@@ -2311,9 +2311,16 @@ ${dialogText}
     return window.matchMedia('(max-width: 600px)').matches;
   }
 
-  function createThoughtProcess(thinking) {
+  function getThinkingStatusText(status) {
+    if (status === 'fallback') return '本次没有返回 Thought process，接口不支持这次的 thinking 参数，已自动退回普通回复。';
+    if (status === 'missing') return '本次没有返回 Thought process。可能是模型这次没有生成，或中转站没有透传 thinking 内容。';
+    return '';
+  }
+
+  function createThoughtProcess(thinking, status = '') {
     const panel = document.createElement('div');
     panel.className = 'thought-process collapsed' + (isMobileViewport() ? ' mobile' : '');
+    const displayText = thinking || getThinkingStatusText(status);
 
     const toggle = document.createElement('button');
     toggle.className = 'thought-toggle';
@@ -2322,11 +2329,11 @@ ${dialogText}
 
     const thinkingEl = document.createElement('div');
     thinkingEl.className = 'thought-content';
-    thinkingEl.textContent = thinking;
+    thinkingEl.textContent = displayText;
 
     toggle.addEventListener('click', () => {
       if (isMobileViewport()) {
-        openThoughtSheet(thinking);
+        openThoughtSheet(displayText);
         return;
       }
       panel.classList.toggle('collapsed');
@@ -2356,7 +2363,7 @@ ${dialogText}
     sheet.setAttribute('aria-hidden', 'true');
   }
 
-  function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '') {
+  function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '', thinkingStatus = '') {
     emptyState.remove();
     const row = document.createElement('div');
     row.className = `msg-row ${role}`;
@@ -2419,7 +2426,7 @@ ${dialogText}
     // DOM order for user (row-reverse): avatar, bubble, actions → visual: actions, bubble, avatar ✓
     // for assistant (normal): avatar, bubble, actions → visual: avatar, bubble, actions ✓
     row.appendChild(avatar);
-    if (role === 'assistant' && thinking) contentWrap.appendChild(createThoughtProcess(thinking));
+    if (role === 'assistant' && (thinking || thinkingStatus)) contentWrap.appendChild(createThoughtProcess(thinking, thinkingStatus));
     contentWrap.appendChild(bubble);
     row.appendChild(contentWrap);
     row.appendChild(actions);
@@ -2626,11 +2633,13 @@ ${dialogText}
         body: JSON.stringify(body),
       });
       let data = await res.json();
+      let retriedWithoutThinking = false;
 
       if (thinkingConfig && (!res.ok || data.error) && shouldRetryWithoutThinking(data)) {
         const plainBody = { ...body };
         delete plainBody.thinking;
         plainBody.max_tokens = 1024;
+        retriedWithoutThinking = true;
         res = await fetch('/api/chat', {
           method: 'POST',
           headers: {
@@ -2652,11 +2661,12 @@ ${dialogText}
       } else {
         const parsed = parseClaudeContent(data.content);
         const reply = parsed.text || '';
+        const thinkingStatus = thinkingConfig && !parsed.thinking ? (retriedWithoutThinking ? 'fallback' : 'missing') : '';
         const session = getSession(currentSessionId);
         const msgs = session.messages || [];
         const assistantTs = Date.now();
-        appendBubble('assistant', reply, msgs.length, false, [], assistantTs, parsed.thinking);
-        msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, timestamp: assistantTs });
+        appendBubble('assistant', reply, msgs.length, false, [], assistantTs, parsed.thinking, thinkingStatus);
+        msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, thinking_status: thinkingStatus, timestamp: assistantTs });
         updateSession(currentSessionId, { messages: msgs });
         // 对话结束后异步提取偏好
         maybeExtractPreferences();
