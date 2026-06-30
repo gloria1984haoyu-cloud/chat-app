@@ -979,7 +979,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-visible-thought-fallback';
+  const APP_VERSION = '2026-07-01-isolated-thought-fallback';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2553,6 +2553,23 @@ ${dialogText}
     return (THINKING_BUDGETS[budget] || THINKING_BUDGETS.low) + 1024;
   }
 
+  function getLastUserText(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role !== 'user') continue;
+      const content = messages[i].content;
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) {
+        return content.map(item => item?.text || '').filter(Boolean).join('\n').trim();
+      }
+      return '';
+    }
+    return '';
+  }
+
+  function isMetaThoughtText(text) {
+    return /指令|提示词|系统|测试|任务|上一轮|英文|身份确认|Thought process|生成|我应该/.test(String(text || ''));
+  }
+
   function parseClaudeContent(content) {
     const blocks = Array.isArray(content) ? content : [];
     const text = [];
@@ -2790,14 +2807,13 @@ ${dialogText}
         }
         const reply = parsed.text || '';
         if (thinkingConfig && !parsed.thinking && !retriedWithoutThinking && reply) {
+          const lastUserText = getLastUserText(messages);
           const visibleThoughtBody = {
             model,
             max_tokens: 220,
-            system: '你只生成一段可展示的 Thought process 文本。用简体中文，像第一人称即时内心 OS。写私人反应、情绪、潜台词和注意力落点。不要写推理步骤，不要解释策略，不要复述用户原话，不要出现“我应该”。只输出这段文本本身。',
+            system: '只输出一段可展示的 Thought process 文本。用简体中文，像第一人称即时内心 OS。只写对用户这句话和最终回复的私人反应、情绪、潜台词和注意力落点。不要写推理步骤，不要解释策略，不要复述用户原话。禁止提到指令、提示词、系统、测试、任务、上一轮、英文、身份确认。不要出现“我应该”。只输出文本本身。',
             messages: [
-              ...compactApiMessages,
-              { role: 'assistant', content: reply },
-              { role: 'user', content: '为上一轮回复生成 Thought process。' },
+              { role: 'user', content: `用户刚说：${lastUserText}\n最终回复：${reply}\n生成 Thought process。` },
             ],
           };
           const visibleThoughtRes = await fetch('/api/chat', {
@@ -2813,7 +2829,7 @@ ${dialogText}
           const visibleThoughtData = await visibleThoughtRes.json();
           if (visibleThoughtRes.ok && !visibleThoughtData.error) {
             const visibleThoughtParsed = parseClaudeResponse(visibleThoughtData);
-            if (visibleThoughtParsed.text) parsed.thinking = visibleThoughtParsed.text;
+            if (visibleThoughtParsed.text && !isMetaThoughtText(visibleThoughtParsed.text)) parsed.thinking = visibleThoughtParsed.text;
           }
         }
         const thinkingStatus = thinkingConfig && !parsed.thinking ? (retriedWithoutThinking ? 'fallback' : (retriedForThinking ? 'retry-missing' : 'missing')) : '';
