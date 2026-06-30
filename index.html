@@ -473,6 +473,11 @@
     .setting-row select:focus,
     .setting-row textarea:focus { border-color: #3a3a3a; }
     .setting-row select option { background: #1a1a1a; }
+    .setting-hint {
+      color: #777;
+      font-size: 12px;
+      line-height: 1.5;
+    }
 
     #save-settings {
       background: #e8e8e8;
@@ -757,13 +762,8 @@
   </div>
   <div class="setting-row">
     <label>模型</label>
-    <select id="cfg-model">
-      <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-      <option value="claude-opus-4-8">claude-opus-4-8</option>
-      <option value="claude-opus-4-5">claude-opus-4-5</option>
-      <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001</option>
-      <option value="claude-opus-4-6">claude-opus-4-6</option>
-    </select>
+    <select id="cfg-model"></select>
+    <div id="cfg-model-hint" class="setting-hint"></div>
   </div>
   <div class="setting-row">
     <label>系统提示词（选填）</label>
@@ -810,6 +810,69 @@
   const CLOUD_CONFIG_FILE_ID = '__lucian_cloud_config__';
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
+  const DEFAULT_MODEL = 'claude-sonnet-4-6';
+  const MODEL_OPTIONS = [
+    {
+      value: 'claude-sonnet-4-6',
+      label: 'claude-sonnet-4-6',
+      tag: '推荐',
+      hint: '日常聊天首选，效果和成本比较平衡。',
+      thinking: 'adaptive',
+    },
+    {
+      value: 'claude-opus-4-6-thinking',
+      label: 'claude-opus-4-6-thinking',
+      tag: '思考',
+      hint: '中转站单独提供的 thinking 模型，之后接思考展示优先用它。',
+      thinking: 'built-in',
+    },
+    {
+      value: 'claude-haiku-4-5',
+      label: 'claude-haiku-4-5',
+      tag: '便宜',
+      hint: '更省额度，适合轻量聊天，复杂表达会弱一点。',
+      thinking: 'budget',
+    },
+    {
+      value: 'claude-opus-4-8',
+      label: 'claude-opus-4-8',
+      tag: '更强',
+      hint: '更强也更贵，适合重要长文和高难度内容。',
+      thinking: 'adaptive',
+    },
+    {
+      value: 'claude-opus-4-7',
+      label: 'claude-opus-4-7',
+      tag: '更强',
+      hint: '偏高质量输出，成本高于 Sonnet。',
+      thinking: 'adaptive',
+    },
+    {
+      value: 'claude-opus-4-5',
+      label: 'claude-opus-4-5',
+      tag: '旧思考',
+      hint: '支持老式 thinking budget，后面可作为兼容选项。',
+      thinking: 'budget',
+    },
+    {
+      value: 'claude-sonnet-4-5',
+      label: 'claude-sonnet-4-5',
+      tag: '备用',
+      hint: 'Sonnet 备用模型，优先级低于 claude-sonnet-4-6。',
+      thinking: 'budget',
+    },
+    {
+      value: 'claude-fable-5',
+      label: 'claude-fable-5',
+      tag: '未知',
+      hint: '中转站提供的模型名，具体能力以中转站实际转发为准。',
+      thinking: 'unknown',
+    },
+  ];
+  const MODEL_ALIASES = {
+    'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
+    'claude-opus-4-6': 'claude-opus-4-6-thinking',
+  };
 
   function sbHeaders() {
     return {
@@ -879,7 +942,7 @@
   async function sbUpsertCloudConfig(cfg) {
     const safeCfg = {
       base: cfg.base || 'https://ai.aiclick.cc',
-      model: cfg.model || 'claude-sonnet-4-6',
+      model: normalizeModelName(cfg.model),
       system: cfg.system || '',
       updated_at: Number(cfg._updated_at || Date.now()),
     };
@@ -1136,7 +1199,7 @@ ${dialogText}
           'x-base-url': base,
         },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-haiku-4-5',
           max_tokens: 512,
           messages: [{ role: 'user', content: extractPrompt }],
         }),
@@ -1376,7 +1439,7 @@ ${dialogText}
           'x-base-url': base,
         },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-haiku-4-5',
           max_tokens: 512,
           messages: [{ role: 'user', content: extractPrompt }],
         }),
@@ -1427,6 +1490,29 @@ ${dialogText}
   const SESSIONS_KEY = 'lc-sessions';
   const CONFIG_KEY = 'lc-config';
 
+  function normalizeModelName(model) {
+    const raw = String(model || '').trim();
+    const normalized = MODEL_ALIASES[raw] || raw || DEFAULT_MODEL;
+    return MODEL_OPTIONS.some(item => item.value === normalized) ? normalized : DEFAULT_MODEL;
+  }
+  function getModelMeta(model) {
+    const normalized = normalizeModelName(model);
+    return MODEL_OPTIONS.find(item => item.value === normalized) || MODEL_OPTIONS[0];
+  }
+  function renderModelOptions(selectedModel) {
+    const select = document.getElementById('cfg-model');
+    const selected = normalizeModelName(selectedModel);
+    select.innerHTML = MODEL_OPTIONS.map(item => (
+      `<option value="${item.value}">${item.label} · ${item.tag}</option>`
+    )).join('');
+    select.value = selected;
+    updateModelHint(selected);
+  }
+  function updateModelHint(model) {
+    const hint = document.getElementById('cfg-model-hint');
+    if (!hint) return;
+    hint.textContent = getModelMeta(model).hint;
+  }
   function getSessions() {
     return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
   }
@@ -1522,7 +1608,7 @@ ${dialogText}
   function applyConfigToForm(cfg) {
     document.getElementById('cfg-key').value = cfg.key || '';
     document.getElementById('cfg-base').value = cfg.base || 'https://ai.aiclick.cc';
-    document.getElementById('cfg-model').value = cfg.model || 'claude-sonnet-4-6';
+    renderModelOptions(cfg.model);
     document.getElementById('cfg-system').value = cfg.system || '';
   }
   function saveConfigLocal(cfg) {
@@ -1550,7 +1636,7 @@ ${dialogText}
       const merged = {
         ...local,
         base: cloud.base || local.base || 'https://ai.aiclick.cc',
-        model: cloud.model || local.model || 'claude-sonnet-4-6',
+        model: normalizeModelName(cloud.model || local.model),
         system: cloud.system || '',
         _updated_at: cloudUpdated,
       };
@@ -2119,7 +2205,7 @@ ${dialogText}
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
     const key = (cfg.key || oldCfg.key || document.getElementById('cfg-key').value || '').trim();
     const base = (cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc').trim();
-    const model = (cfg.model || document.getElementById('cfg-model').value || 'claude-sonnet-4-6').trim();
+    const model = normalizeModelName(cfg.model || document.getElementById('cfg-model').value);
     let system = cfg.system || document.getElementById('cfg-system').value || '';
     if (pinnedFiles.length > 0) {
       const filesContext = pinnedFiles.map(f => `【${f.name}】\n${f.content}`).join('\n\n---\n\n');
@@ -2333,11 +2419,15 @@ ${dialogText}
     settingsPanel.classList.toggle('open');
   });
 
+  document.getElementById('cfg-model').addEventListener('change', e => {
+    updateModelHint(e.target.value);
+  });
+
   document.getElementById('save-settings').addEventListener('click', async () => {
     const cfg = {
       key: document.getElementById('cfg-key').value,
       base: document.getElementById('cfg-base').value || 'https://ai.aiclick.cc',
-      model: document.getElementById('cfg-model').value || 'claude-sonnet-4-6',
+      model: normalizeModelName(document.getElementById('cfg-model').value),
       system: document.getElementById('cfg-system').value,
     };
     await saveConfig(cfg);
