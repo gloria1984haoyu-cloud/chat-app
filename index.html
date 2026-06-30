@@ -2601,6 +2601,15 @@ ${dialogText}
 
   function parseClaudeResponse(data) {
     const parsed = parseClaudeContent(data?.content);
+    const inlineThoughtMatch = parsed.text.match(/^\s*(?:\*\*)?(?:Thought process|思考|思考过程)(?:\*\*)?\s*[:：]\s*\n?/i);
+    if (inlineThoughtMatch) {
+      const withoutLabel = parsed.text.slice(inlineThoughtMatch[0].length).trim();
+      const parts = withoutLabel.split(/\n{2,}/).map(part => part.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        parsed.thinking = parts[0];
+        parsed.text = parts.slice(1).join('\n\n').trim();
+      }
+    }
     if (!parsed.thinking) {
       const alternateThinking = collectReasoningText({
         thinking: data?.thinking,
@@ -2685,6 +2694,7 @@ ${dialogText}
 
     try {
       const apiMessages = messages.slice(-80).map(({ role, content }) => ({ role, content }));
+      const compactApiMessages = messages.slice(-40).map(({ role, content }) => ({ role, content }));
       const body = { model, max_tokens: 1024, messages: apiMessages };
       if (system) body.system = system;
       const thinkingConfig = buildThinkingConfig(model, thinkingEnabled, thinkingBudget);
@@ -2754,6 +2764,7 @@ ${dialogText}
         if (thinkingConfig?.type === 'adaptive' && !parsed.thinking && !retriedWithoutThinking) {
           const retryBody = {
             ...body,
+            messages: compactApiMessages,
             thinking: { type: 'adaptive', display: 'summarized' },
             output_config: { effort: 'high' },
             max_tokens: Math.max(body.max_tokens, 8192),
