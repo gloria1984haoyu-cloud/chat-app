@@ -1018,7 +1018,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-01-fast-mobile-start';
+  const APP_VERSION = '2026-07-03-reliable-session-sync';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1152,12 +1152,17 @@ Thought process 要评价小雨的回复，不要描述小雨的回复。评价�
   }
   async function sbUpsertSession(session) {
     try {
-      await fetch(`${SB_URL}/rest/v1/sessions`, {
+      const payload = JSON.stringify(session);
+      const res = await fetch(`${SB_URL}/rest/v1/sessions`, {
         method: 'POST',
         headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates' },
-        body: JSON.stringify(session),
+        body: payload,
+        keepalive: payload.length < 60000,
       });
-    } catch {}
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
   async function sbDeleteSession(id) {
     try {
@@ -1836,14 +1841,35 @@ ${dialogText}
   function saveSessions(sessions) {
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
   }
+  function getPendingSessionSyncIds() {
+    try {
+      return JSON.parse(localStorage.getItem('lc-pending-session-sync') || '[]');
+    } catch {
+      return [];
+    }
+  }
+  function setPendingSessionSyncIds(ids) {
+    localStorage.setItem('lc-pending-session-sync', JSON.stringify([...new Set(ids)].filter(Boolean)));
+  }
+  function markSessionPendingSync(id) {
+    setPendingSessionSyncIds([...getPendingSessionSyncIds(), id]);
+  }
+  function clearSessionPendingSync(id) {
+    setPendingSessionSyncIds(getPendingSessionSyncIds().filter(item => item !== id));
+  }
   function sessionSortValue(session) {
     const messages = Array.isArray(session.messages) ? session.messages : [];
     const last = messages[messages.length - 1];
-    return Number(last?.timestamp || session.created_at || session.id || 0);
+    return Number(session._updated_at || last?.timestamp || session.created_at || session.id || 0);
   }
   function isNewerSession(a, b) {
     const aMessages = Array.isArray(a.messages) ? a.messages : [];
     const bMessages = Array.isArray(b.messages) ? b.messages : [];
+    const aUpdated = Number(a._updated_at || 0);
+    const bUpdated = Number(b._updated_at || 0);
+    if (aUpdated || bUpdated) {
+      if (aUpdated !== bUpdated) return aUpdated > bUpdated;
+    }
     const aTime = sessionSortValue(a);
     const bTime = sessionSortValue(b);
     if (aTime !== bTime) return aTime > bTime;
@@ -1881,7 +1907,22 @@ ${dialogText}
     });
     return [...byId.values()].sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
   }
+  async function flushPendingSessionSync() {
+    const ids = getPendingSessionSyncIds();
+    if (ids.length === 0) return;
+    const sessions = getSessions();
+    await Promise.all(ids.map(async id => {
+      const session = sessions.find(item => item.id === id);
+      if (!session) {
+        clearSessionPendingSync(id);
+        return;
+      }
+      const ok = await sbUpsertSession(session);
+      if (ok) clearSessionPendingSync(id);
+    }));
+  }
   async function syncSessionsFromCloud({ writeBack = false, refreshCurrent = true } = {}) {
+    await flushPendingSessionSync();
     const cloudSessions = await sbFetchSessions();
     if (!cloudSessions) return false;
 
@@ -1895,7 +1936,12 @@ ${dialogText}
     if (writeBack) {
       merged.forEach(session => {
         const cloud = cloudSessions.find(s => s.id === session.id);
-        if (!cloud || isNewerSession(session, cloud)) sbUpsertSession(session);
+        if (!cloud || isNewerSession(session, cloud)) {
+          markSessionPendingSync(session.id);
+          sbUpsertSession(session).then(ok => {
+            if (ok) clearSessionPendingSync(session.id);
+          });
+        }
       });
     }
 
@@ -2108,20 +2154,25 @@ ${dialogText}
 
     // 再从云端拉取并合并最新数据。手机和电脑各自有 localStorage，必须以云端为准合并。
     await syncSessionsFromCloud({ writeBack: true });
-    setInterval(() => syncSessionsFromCloud({ refreshCurrent: document.visibilityState === 'visible' }), 20000);
+    setInterval(() => syncSessionsFromCloud({ writeBack: true, refreshCurrent: document.visibilityState === 'visible' }), 20000);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') syncSessionsFromCloud();
+      if (document.visibilityState === 'visible') syncSessionsFromCloud({ writeBack: true });
+      else flushPendingSessionSync();
     });
+    window.addEventListener('pagehide', () => { flushPendingSessionSync(); });
   }
 
   // ── Session management ──
   function createSession() {
     const id = Date.now().toString();
-    const session = { id, title: '新对话', messages: [], created_at: parseInt(id) };
+    const session = { id, title: '新对话', messages: [], created_at: parseInt(id), _updated_at: Date.now() };
     const sessions = getSessions();
     sessions.unshift(session);
     saveSessions(sessions);
-    sbUpsertSession(session);
+    markSessionPendingSync(id);
+    sbUpsertSession(session).then(ok => {
+      if (ok) clearSessionPendingSync(id);
+    });
     return session;
   }
 
@@ -2133,9 +2184,12 @@ ${dialogText}
     const sessions = getSessions();
     const idx = sessions.findIndex(s => s.id === id);
     if (idx >= 0) {
-      sessions[idx] = Object.assign(sessions[idx], patch);
+      sessions[idx] = Object.assign(sessions[idx], patch, { _updated_at: Date.now() });
       saveSessions(sessions);
-      sbUpsertSession(sessions[idx]);
+      markSessionPendingSync(id);
+      sbUpsertSession(sessions[idx]).then(ok => {
+        if (ok) clearSessionPendingSync(id);
+      });
     }
   }
 
