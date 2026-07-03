@@ -1018,7 +1018,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-03-reliable-session-sync';
+  const APP_VERSION = '2026-07-04-chat-timeout-memory-fix';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1120,6 +1120,9 @@
     medium: 2048,
     high: 4096,
   };
+  const CHAT_REQUEST_TIMEOUT_MS = 90000;
+  const CHAT_RETRY_DELAY_MS = 900;
+  const EXTRACTION_MODEL = 'claude-haiku-4-5-20251001';
   const THOUGHT_OS_PROMPT = `Thought process 是单独展示区，不属于最终回复正文。
 
 Thought process 用简体中文，写成黎川当下对小雨这句话冒出来的私人内心 OS。它不是推理记录，不是任务分析，不是回复策略。
@@ -1459,21 +1462,15 @@ ${dialogText}
 请直接输出列表，格式：[hobby] 内容 或 [opinion] 内容 等`;
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'x-base-url': base,
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
+      const { res, data } = await fetchChatJson({
+        key,
+        base,
+        body: {
+          model: EXTRACTION_MODEL,
           max_tokens: 512,
           messages: [{ role: 'user', content: extractPrompt }],
-        }),
+        },
       });
-      const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error?.message || 'API error');
 
       const text = data.content?.[0]?.text || '';
@@ -1699,21 +1696,15 @@ ${dialogText}
 请直接输出记忆列表，每行格式：[high] 内容 或 [low] 内容`;
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'x-base-url': base,
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
+      const { res, data } = await fetchChatJson({
+        key,
+        base,
+        body: {
+          model: EXTRACTION_MODEL,
           max_tokens: 512,
           messages: [{ role: 'user', content: extractPrompt }],
-        }),
+        },
       });
-      const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error?.message || 'API error');
 
       const text = data.content?.[0]?.text || '';
@@ -2694,6 +2685,56 @@ ${dialogText}
       msg.includes('max_tokens');
   }
 
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function isRetryableChatFailure(res, data, err) {
+    const msg = String(err?.message || data?.error?.message || data?.message || '').toLowerCase();
+    if (err) return err.name === 'AbortError' || msg.includes('network') || msg.includes('failed') || msg.includes('timeout');
+    if (!res) return false;
+    return res.status === 408 || res.status === 429 || res.status >= 500 || msg.includes('timeout') || msg.includes('timed out');
+  }
+
+  async function fetchChatJson({ key, base, body, retries = 1, timeoutMs = CHAT_REQUEST_TIMEOUT_MS }) {
+    let lastErr = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'x-base-url': base,
+          },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        let data = {};
+        try { data = await res.json(); }
+        catch { data = { error: { message: 'Invalid JSON response' } }; }
+        if (attempt < retries && isRetryableChatFailure(res, data, null)) {
+          await delay(CHAT_RETRY_DELAY_MS);
+          continue;
+        }
+        return { res, data };
+      } catch (err) {
+        clearTimeout(timer);
+        lastErr = err;
+        if (attempt < retries && isRetryableChatFailure(null, null, err)) {
+          await delay(CHAT_RETRY_DELAY_MS);
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr || new Error('网络超时');
+  }
+
   // ── API call (shared) ──
   async function callApi(messages) {
     const cfg = getConfig();
@@ -2744,33 +2785,13 @@ ${dialogText}
         body.max_tokens = Math.max(body.max_tokens, (THINKING_BUDGETS[thinkingBudget] || THINKING_BUDGETS.low) + 1024);
       }
 
-      let res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'x-base-url': base,
-        },
-        body: JSON.stringify(body),
-      });
-      let data = await res.json();
+      let { res, data } = await fetchChatJson({ key, base, body });
 
       if (thinkingConfig && (!res.ok || data.error) && shouldRetryWithoutThinking(data)) {
         const plainBody = { ...body };
         delete plainBody.thinking;
         plainBody.max_tokens = 1024;
-        res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': key,
-            'anthropic-version': '2023-06-01',
-            'x-base-url': base,
-          },
-          body: JSON.stringify(plainBody),
-        });
-        data = await res.json();
+        ({ res, data } = await fetchChatJson({ key, base, body: plainBody }));
       }
 
       typingRow.remove();
