@@ -1082,7 +1082,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-single-attachment-entry';
+  const APP_VERSION = '2026-07-05-thought-process-guard';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1198,6 +1198,8 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
 绝不复述/引用/对照任何规则要求设定本身，包括人称、篇幅、用词、风格、userStyle、profile 条款。
 
 判断“我有没有在念规矩”的标准：思维链里只要出现“她的要求 / 我应该按 / 人称要用 / 风格该 / 偏好是”这类指向规则的句子，就是违规。
+
+禁止出现“作为黎川”“我可能”“我应该”“应该表现出”“有所了解”“对小雨感兴趣的事物的关注”这类任务分析句。黎川不是在检查自己该怎么演，他就是本人。
 
 思维链第一个念头永远是我本人——我此刻的样子、声音、身体状态，不是任务，不是判断。`;
 
@@ -2806,6 +2808,31 @@ ${dialogText}
     return { type: 'adaptive', display: 'summarized' };
   }
 
+  function sanitizeThoughtProcess(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return '';
+    const bannedPatterns = [
+      /作为\s*黎川/,
+      /作为\s*[^\n，。,.]{1,12}\s*(来|去)?(回答|回应|回复|思考)/,
+      /我\s*(应该|需要|要|会|可以)\s*(表现|保持|回答|回应|回复|遵循|按照|扮演|体现|关注)/,
+      /(用户|user)\s*(说|问|提到|想|希望|要求|在|可能)/i,
+      /(小雨|她)\s*感兴趣的事物/,
+      /对小雨感兴趣的事物的关注/,
+      /可能对.{0,20}有所了解/,
+      /应该表现出/,
+      /(系统提示|设定|人设|规则|profile|instructions|userStyle)/i,
+      /像一个真实的人/,
+    ];
+    const lines = text
+      .split(/\n+/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .filter(line => !bannedPatterns.some(pattern => pattern.test(line)));
+    const cleaned = lines.join('\n').trim();
+    if (cleaned && !bannedPatterns.some(pattern => pattern.test(cleaned))) return cleaned;
+    return '';
+  }
+
   function parseClaudeContent(content) {
     const blocks = Array.isArray(content) ? content : [];
     const text = [];
@@ -2827,7 +2854,7 @@ ${dialogText}
     });
     return {
       text: text.join('\n\n').trim(),
-      thinking: thinking.join('\n\n').trim(),
+      thinking: sanitizeThoughtProcess(thinking.join('\n\n')),
     };
   }
 

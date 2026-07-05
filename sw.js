@@ -1,4 +1,4 @@
-const CACHE = 'lucian-v10';
+const CACHE = 'lucian-v11';
 
 self.addEventListener('install', e => {
   e.waitUntil(
