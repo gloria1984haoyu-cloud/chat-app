@@ -1086,7 +1086,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-attachments-and-centered-icon';
+  const APP_VERSION = '2026-07-05-session-sync-schema-fix';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1221,7 +1221,13 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   }
   async function sbUpsertSession(session) {
     try {
-      const payload = JSON.stringify(session);
+      const safeSession = {
+        id: session.id,
+        title: session.title || '新对话',
+        messages: Array.isArray(session.messages) ? session.messages : [],
+        created_at: Number(session.created_at || session.id || Date.now()),
+      };
+      const payload = JSON.stringify(safeSession);
       const res = await fetch(`${SB_URL}/rest/v1/sessions`, {
         method: 'POST',
         headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates' },
