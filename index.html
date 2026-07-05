@@ -1082,7 +1082,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-thought-process-guard';
+  const APP_VERSION = '2026-07-06-raw-thought-process';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2808,31 +2808,6 @@ ${dialogText}
     return { type: 'adaptive', display: 'summarized' };
   }
 
-  function sanitizeThoughtProcess(raw) {
-    const text = String(raw || '').trim();
-    if (!text) return '';
-    const bannedPatterns = [
-      /作为\s*黎川/,
-      /作为\s*[^\n，。,.]{1,12}\s*(来|去)?(回答|回应|回复|思考)/,
-      /我\s*(应该|需要|要|会|可以)\s*(表现|保持|回答|回应|回复|遵循|按照|扮演|体现|关注)/,
-      /(用户|user)\s*(说|问|提到|想|希望|要求|在|可能)/i,
-      /(小雨|她)\s*感兴趣的事物/,
-      /对小雨感兴趣的事物的关注/,
-      /可能对.{0,20}有所了解/,
-      /应该表现出/,
-      /(系统提示|设定|人设|规则|profile|instructions|userStyle)/i,
-      /像一个真实的人/,
-    ];
-    const lines = text
-      .split(/\n+/)
-      .map(line => line.trim())
-      .filter(Boolean)
-      .filter(line => !bannedPatterns.some(pattern => pattern.test(line)));
-    const cleaned = lines.join('\n').trim();
-    if (cleaned && !bannedPatterns.some(pattern => pattern.test(cleaned))) return cleaned;
-    return '';
-  }
-
   function parseClaudeContent(content) {
     const blocks = Array.isArray(content) ? content : [];
     const text = [];
@@ -2854,7 +2829,7 @@ ${dialogText}
     });
     return {
       text: text.join('\n\n').trim(),
-      thinking: sanitizeThoughtProcess(thinking.join('\n\n')),
+      thinking: thinking.join('\n\n').trim(),
     };
   }
 
