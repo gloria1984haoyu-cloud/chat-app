@@ -265,48 +265,54 @@
     /* ── Message actions ── */
     .msg-actions {
       display: flex;
-      flex-direction: column;
-      gap: 2px;
+      flex-direction: row;
+      align-items: center;
+      gap: 12px;
       opacity: 0;
+      pointer-events: none;
       transition: opacity 0.15s;
       flex-shrink: 0;
-      padding-bottom: 2px;
+      min-height: 24px;
+      padding: 2px 0 0;
     }
-    .msg-row:hover .msg-actions { opacity: 1; }
+    .msg-row.actions-visible .msg-actions {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .msg-row.user .msg-actions { justify-content: flex-end; }
+    .msg-row.assistant .msg-actions { justify-content: flex-start; }
     .msg-action-btn {
-      background: #151515;
-      border: 1px solid transparent;
-      color: #8a8a8a;
+      background: transparent;
+      border: none;
+      color: #8f8b86;
       cursor: pointer;
       padding: 0;
-      border-radius: 8px;
+      border-radius: 6px;
       line-height: 1;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 30px;
-      height: 30px;
-      transition: color .15s ease, background .15s ease, border-color .15s ease;
+      width: 26px;
+      height: 26px;
+      transition: color .15s ease, background .15s ease;
     }
     .msg-action-btn svg {
-      width: 17px;
-      height: 17px;
+      width: 21px;
+      height: 21px;
       stroke: currentColor;
-      stroke-width: 1.7;
+      stroke-width: 1.8;
       fill: none;
       stroke-linecap: round;
       stroke-linejoin: round;
     }
     .msg-action-btn:hover {
       color: #e8e8e8;
-      background: #202020;
-      border-color: #303030;
+      background: #1f1f1f;
     }
-    .msg-action-delete { color: #555; }
+    .msg-action-delete { color: #77726d; }
     .msg-action-delete:hover {
       color: #ff6b6b;
       background: #211616;
-      border-color: #3a2020;
     }
 
     /* ── Edit mode ── */
@@ -907,8 +913,7 @@
       .avatar { display: none; }
       .bubble { max-width: 100%; }
 
-      /* Message actions: always show on mobile (no hover) */
-      .msg-actions { opacity: 1; }
+      /* Message actions stay tap-to-show on mobile */
       .edit-wrapper {
         width: calc(100vw - 72px);
         max-width: calc(100vw - 72px);
@@ -1082,7 +1087,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-06-raw-thought-process';
+  const APP_VERSION = '2026-07-06-native-message-actions';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2166,6 +2171,7 @@ ${dialogText}
   let currentSessionId = null;
   let currentView = 'chat';
   let isLoading = false;
+  let activeActionMessageKey = null;
   let pendingImages = []; // [{base64, mediaType, dataUrl}]
   let pendingAttachments = []; // [{name, content, size}]
 
@@ -2514,6 +2520,7 @@ ${dialogText}
   }
 
   function renderSessionMessages(session, startIndex = 0, preserveScroll = false) {
+    activeActionMessageKey = null;
     const messages = session.messages || [];
     const previousHeight = chatArea.scrollHeight;
     const previousTop = chatArea.scrollTop;
@@ -2662,27 +2669,28 @@ ${dialogText}
     actions.className = 'msg-actions';
 
     if (msgIdx >= 0 && !isError) {
-      if (role === 'user') {
-        const editBtn = makeActionBtn('edit', '编辑', () => startEdit(row, bubble, msgIdx));
-        actions.appendChild(editBtn);
-      }
-      if (role === 'assistant') {
-        const regenBtn = makeActionBtn('regen', '重新生成', () => regenMsg(msgIdx));
-        actions.appendChild(regenBtn);
-      }
+      const editBtn = makeActionBtn('edit', '编辑', () => startEdit(row, bubble, msgIdx, role));
+      actions.appendChild(editBtn);
       const delBtn = makeActionBtn('delete', '删除此条及之后', () => deleteMsg(msgIdx));
       actions.appendChild(delBtn);
     }
 
-    // layout: user row is row-reverse, so DOM order [actions, bubble, avatar] → visual [avatar, bubble, actions reversed]
-    // for user: we want avatar right, bubble middle, actions left
-    // DOM order for user (row-reverse): avatar, bubble, actions → visual: actions, bubble, avatar ✓
-    // for assistant (normal): avatar, bubble, actions → visual: avatar, bubble, actions ✓
     row.appendChild(avatar);
     if (role === 'assistant' && thinking) contentWrap.appendChild(createThoughtProcess(thinking));
     contentWrap.appendChild(bubble);
+    contentWrap.appendChild(actions);
     row.appendChild(contentWrap);
-    row.appendChild(actions);
+
+    if (msgIdx >= 0 && !isError) {
+      const actionKey = `${currentSessionId || 'local'}:${msgIdx}`;
+      row.dataset.actionKey = actionKey;
+      if (activeActionMessageKey === actionKey) row.classList.add('actions-visible');
+      row.addEventListener('click', () => {
+        activeActionMessageKey = activeActionMessageKey === actionKey ? null : actionKey;
+        chatArea.querySelectorAll('.msg-row.actions-visible').forEach(item => item.classList.remove('actions-visible'));
+        if (activeActionMessageKey === actionKey) row.classList.add('actions-visible');
+      });
+    }
 
     chatArea.appendChild(row);
     if (scrollToBottom) chatArea.scrollTop = chatArea.scrollHeight;
@@ -2691,9 +2699,8 @@ ${dialogText}
 
   function getActionIcon(name) {
     const icons = {
-      edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.7 4.3a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 20.5l2-4L15.7 4.3Z"></path><path d="m14.5 5.5 3 3"></path></svg>',
-      regen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><path d="M20 4v6h-6"></path></svg>',
-      delete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>',
+      edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19.1 9.1a2.8 2.8 0 0 0-4-4L4.2 16 4 20Z"></path><path d="m13.8 6.4 3.8 3.8"></path></svg>',
+      delete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M6.5 7l.8 13h9.4l.8-13"></path><path d="M9 7V4h6v3"></path></svg>',
     };
     return icons[name] || '';
   }
@@ -2705,12 +2712,15 @@ ${dialogText}
     btn.title = title;
     btn.setAttribute('aria-label', title);
     btn.innerHTML = getActionIcon(iconName);
-    btn.addEventListener('click', onClick);
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      onClick();
+    });
     return btn;
   }
 
   // ── Inline edit ──
-  function startEdit(row, bubble, msgIdx) {
+  function startEdit(row, bubble, msgIdx, role) {
     if (isLoading) return;
     const originalText = bubble.querySelector('.msg-text')?.textContent || '';
 
@@ -2753,7 +2763,8 @@ ${dialogText}
       const newText = ta.value.trim();
       if (!newText) return;
       wrapper.replaceWith(bubble);
-      await editAndResend(msgIdx, newText);
+      if (role === 'user') await editAndResend(msgIdx, newText);
+      else editMessageOnly(msgIdx, newText);
     });
 
     ta.addEventListener('keydown', e => {
@@ -2772,14 +2783,6 @@ ${dialogText}
     });
   }
 
-  async function regenMsg(msgIdx) {
-    if (isLoading) return;
-    const messages = truncateAt(msgIdx);
-    removeDomFrom(msgIdx);
-    if (messages.length === 0) return;
-    await callApi(messages);
-  }
-
   async function editAndResend(msgIdx, newText) {
     if (isLoading) return;
     const session = getSession(currentSessionId);
@@ -2792,6 +2795,16 @@ ${dialogText}
     messages.push({ role: 'user', content: newText, timestamp: originalTs });
     updateSession(currentSessionId, { messages });
     await callApi(messages);
+  }
+
+  function editMessageOnly(msgIdx, newText) {
+    const session = getSession(currentSessionId);
+    const messages = Array.isArray(session?.messages) ? session.messages.slice() : [];
+    const original = messages[msgIdx];
+    if (!original) return;
+    messages[msgIdx] = { ...original, content: newText, timestamp: original.timestamp || Date.now() };
+    updateSession(currentSessionId, { messages });
+    loadSession(currentSessionId);
   }
 
   function buildThinkingConfig(model, enabled, budget) {
