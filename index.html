@@ -1082,7 +1082,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-chat-timeout-errors';
+  const APP_VERSION = '2026-07-05-short-context-timeout-retry';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2374,8 +2374,8 @@ ${dialogText}
     return blocks;
   }
 
-  function buildApiMessages(messages) {
-    const recent = messages.slice(-80);
+  function buildApiMessages(messages, limit = 80) {
+    const recent = messages.slice(-limit);
     let lastImageMessageIndex = -1;
     for (let i = recent.length - 1; i >= 0; i--) {
       if (recent[i]?.role === 'user' && contentHasImages(recent[i].content)) {
@@ -2868,6 +2868,16 @@ ${dialogText}
       msg.includes('max_tokens');
   }
 
+  function isTimeoutLikeResponse(res, data) {
+    const msg = String(data?.error?.message || data?.message || '').toLowerCase();
+    return res?.status === 504 ||
+      res?.status === 408 ||
+      msg.includes('timeout') ||
+      msg.includes('超时') ||
+      msg.includes('timed out') ||
+      msg.includes('function was stopped');
+  }
+
   function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -2983,20 +2993,35 @@ ${dialogText}
         body.max_tokens = Math.max(body.max_tokens, (THINKING_BUDGETS[thinkingBudget] || THINKING_BUDGETS.low) + 1024);
       }
 
-      let { res, data } = await fetchChatJson({ key, base, body });
+      let usedShortContextRetry = false;
+      let { res, data } = await fetchChatJson({ key, base, body, retries: 0 });
+
+      if ((!res.ok || data.error) && isTimeoutLikeResponse(res, data) && messages.length > 24) {
+        usedShortContextRetry = true;
+        const shortBody = {
+          ...body,
+          messages: buildApiMessages(messages, 24),
+          max_tokens: thinkingConfig ? Math.max(2048, (THINKING_BUDGETS.low || 1024) + 768) : 1024,
+        };
+        if (shortBody.thinking && shortBody.thinking.budget_tokens) {
+          shortBody.thinking = { ...shortBody.thinking, budget_tokens: THINKING_BUDGETS.low || 1024 };
+        }
+        ({ res, data } = await fetchChatJson({ key, base, body: shortBody, retries: 0, timeoutMs: 60000 }));
+      }
 
       if (thinkingConfig && (!res.ok || data.error) && shouldRetryWithoutThinking(data)) {
         const plainBody = { ...body };
         delete plainBody.thinking;
         plainBody.max_tokens = 1024;
-        ({ res, data } = await fetchChatJson({ key, base, body: plainBody }));
+        ({ res, data } = await fetchChatJson({ key, base, body: plainBody, retries: 0 }));
       }
 
       typingRow.remove();
 
       if (!res.ok || data.error) {
         const errMsg = data.error?.message || JSON.stringify(data);
-        appendBubble('assistant', `出错了 (${res.status})：${errMsg}`, -1, true);
+        const prefix = usedShortContextRetry ? '已用短上下文重试，但还是失败。' : '';
+        appendBubble('assistant', `出错了 (${res.status})：${prefix}${errMsg}`, -1, true);
       } else {
         const parsed = parseClaudeContent(data.content);
         const reply = parsed.text || '';
