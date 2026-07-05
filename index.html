@@ -483,7 +483,8 @@
       gap: 10px;
       align-items: flex-end;
     }
-    #attach-btn {
+    #attach-btn,
+    #camera-btn {
       background: none;
       border: none;
       color: #666;
@@ -496,7 +497,8 @@
       display: flex;
       align-items: center;
     }
-    #attach-btn:hover { color: #e8e8e8; }
+    #attach-btn:hover,
+    #camera-btn:hover { color: #e8e8e8; }
     #image-preview-bar {
       display: flex;
       gap: 8px;
@@ -515,6 +517,33 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+    .file-thumb {
+      position: relative;
+      min-width: 120px;
+      max-width: 220px;
+      min-height: 44px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #171717;
+      color: #cfcfcf;
+      font-size: 12px;
+      line-height: 1.35;
+      padding: 8px 28px 8px 10px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+    }
+    .file-thumb-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .file-thumb-meta {
+      color: #666;
+      font-size: 10px;
+      margin-left: 6px;
+      flex-shrink: 0;
     }
     .img-thumb-remove {
       position: absolute;
@@ -970,8 +999,10 @@
   <div id="input-bar">
     <div id="image-preview-bar"></div>
     <div id="input-row">
-      <button id="attach-btn" title="上传图片">📎</button>
-      <input id="file-input" type="file" accept="image/*" multiple style="display:none" />
+      <button id="attach-btn" title="上传图片或文件">📎</button>
+      <button id="camera-btn" title="拍照">📷</button>
+      <input id="file-input" type="file" accept="image/*,.txt,.md,.pdf,.docx" multiple style="display:none" />
+      <input id="camera-input" type="file" accept="image/*" capture="environment" style="display:none" />
       <textarea id="user-input" placeholder="说点什么…" rows="1"></textarea>
       <button id="send-btn">↑</button>
     </div>
@@ -1055,7 +1086,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-claude-action-buttons';
+  const APP_VERSION = '2026-07-05-attachments-and-centered-icon';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2132,6 +2163,7 @@ ${dialogText}
   let currentView = 'chat';
   let isLoading = false;
   let pendingImages = []; // [{base64, mediaType, dataUrl}]
+  let pendingAttachments = []; // [{name, content, size}]
 
   // ── DOM refs ──
   const sidebar = document.getElementById('sidebar');
@@ -2284,6 +2316,75 @@ ${dialogText}
     closeMobileSidebar();
   }
 
+  function getContentText(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+      .map(block => {
+        if (!block) return '';
+        if (block.type === 'text') return block.text || '';
+        if (block.type === 'document') return block.text || '';
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  function getContentImageUrls(content) {
+    if (!Array.isArray(content)) return [];
+    return content
+      .filter(block => block?.type === 'image' && block.source)
+      .map(block => {
+        const source = block.source;
+        if (source.type === 'base64' && source.data) {
+          return `data:${source.media_type || 'image/jpeg'};base64,${source.data}`;
+        }
+        if (source.type === 'url') return source.url || '';
+        return '';
+      })
+      .filter(Boolean);
+  }
+
+  function contentHasImages(content) {
+    return Array.isArray(content) && content.some(block => block?.type === 'image');
+  }
+
+  function normalizeApiContent(content, keepImages) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    const blocks = [];
+    let omittedImages = 0;
+    content.forEach(block => {
+      if (!block) return;
+      if (block.type === 'text') {
+        blocks.push({ type: 'text', text: block.text || '' });
+      } else if (block.type === 'image') {
+        if (keepImages) blocks.push(block);
+        else omittedImages++;
+      }
+    });
+    if (omittedImages > 0) {
+      blocks.push({ type: 'text', text: `【之前发送过 ${omittedImages} 张图片，当前轮不重复上传原图。】` });
+    }
+    if (blocks.length === 1 && blocks[0].type === 'text') return blocks[0].text;
+    return blocks;
+  }
+
+  function buildApiMessages(messages) {
+    const recent = messages.slice(-80);
+    let lastImageMessageIndex = -1;
+    for (let i = recent.length - 1; i >= 0; i--) {
+      if (recent[i]?.role === 'user' && contentHasImages(recent[i].content)) {
+        lastImageMessageIndex = i;
+        break;
+      }
+    }
+    return recent.map((message, index) => ({
+      role: message.role,
+      content: normalizeApiContent(message.content, index === lastImageMessageIndex),
+    }));
+  }
+
   function showMemoryPage() {
     currentView = 'memory';
     chatArea.innerHTML = `
@@ -2427,7 +2528,7 @@ ${dialogText}
       }
       messages.slice(startIndex).forEach((m, offset) => {
         const i = startIndex + offset;
-        appendBubble(m.role, m.content, i, false, [], m.timestamp || null, m.thinking || '', false);
+        appendBubble(m.role, m.content, i, false, getContentImageUrls(m.content), m.timestamp || null, m.thinking || '', false);
       });
       if (preserveScroll) chatArea.scrollTop = chatArea.scrollHeight - previousHeight + previousTop;
       else chatArea.scrollTop = chatArea.scrollHeight;
@@ -2511,6 +2612,8 @@ ${dialogText}
   }
 
   function appendBubble(role, content, msgIdx, isError = false, imageUrls = [], timestamp = null, thinking = '', scrollToBottom = true) {
+    const displayText = getContentText(content);
+    const displayImages = imageUrls.length > 0 ? imageUrls : getContentImageUrls(content);
     emptyState.remove();
     const row = document.createElement('div');
     row.className = `msg-row ${role}`;
@@ -2524,13 +2627,13 @@ ${dialogText}
     bubble.className = 'bubble' + (isError ? ' error' : '');
     const contentWrap = document.createElement('div');
     contentWrap.className = 'msg-content';
-    const plainText = typeof content === 'string' ? content : '';
-    const isShortText = plainText.trim().length > 0 && plainText.trim().length <= 8 && !plainText.includes('\n') && imageUrls.length === 0;
+    const plainText = displayText;
+    const isShortText = plainText.trim().length > 0 && plainText.trim().length <= 8 && !plainText.includes('\n') && displayImages.length === 0;
     if (isShortText) bubble.classList.add('short');
-    if (imageUrls.length > 0) {
+    if (displayImages.length > 0) {
       const imgWrap = document.createElement('div');
       imgWrap.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;';
-      imageUrls.forEach(url => {
+      displayImages.forEach(url => {
         const img = document.createElement('img');
         img.src = url;
         img.style.cssText = 'max-width:120px;max-height:120px;border-radius:6px;object-fit:cover;';
@@ -2540,8 +2643,8 @@ ${dialogText}
     }
     const textEl = document.createElement('div');
     textEl.className = 'msg-text';
-    textEl.textContent = content;
-    bubble.appendChild(textEl);
+    textEl.textContent = displayText;
+    if (displayText) bubble.appendChild(textEl);
 
     if (timestamp) {
       const timeEl = document.createElement('div');
@@ -2828,7 +2931,7 @@ ${dialogText}
     const typingRow = showTyping();
 
     try {
-      const apiMessages = messages.slice(-80).map(({ role, content }) => ({ role, content }));
+      const apiMessages = buildApiMessages(messages);
       const body = { model, max_tokens: 1024, messages: apiMessages };
       if (system) body.system = system;
       if (thinkingConfig) {
@@ -2895,7 +2998,8 @@ ${dialogText}
   // ── Send message ──
   async function sendMessage() {
     const text = userInput.value.trim();
-    if (!text || isLoading) return;
+    if (isLoading) return;
+    if (!text && pendingImages.length === 0 && pendingAttachments.length === 0) return;
 
     const cfg = getConfig();
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
@@ -2919,9 +3023,14 @@ ${dialogText}
     const messages = session.messages || [];
     const msgIdx = messages.length;
 
-    // Build content (text + images)
+    // Build content (text + images + extracted file text)
     const images = [...pendingImages];
+    const attachments = [...pendingAttachments];
     clearImagePreviews();
+    const attachmentText = attachments
+      .map(file => `【附件：${file.name}】\n${file.content}`)
+      .join('\n\n---\n\n');
+    const finalText = [attachmentText, text].filter(Boolean).join('\n\n');
 
     let userContent;
     if (images.length > 0) {
@@ -2930,18 +3039,18 @@ ${dialogText}
           type: 'image',
           source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
         })),
-        { type: 'text', text },
+        { type: 'text', text: finalText || '请看这张图片。' },
       ];
     } else {
-      userContent = text;
+      userContent = finalText;
     }
 
     const userTs = Date.now();
-    appendBubble('user', text, msgIdx, false, images.map(i => i.dataUrl), userTs);
+    appendBubble('user', userContent, msgIdx, false, images.map(i => i.dataUrl), userTs);
     messages.push({ role: 'user', content: userContent, timestamp: userTs });
 
     if (messages.length === 1 && !session.title_locked) {
-      updateSession(currentSessionId, { title: text.slice(0, 30), messages });
+      updateSession(currentSessionId, { title: (text || attachments[0]?.name || '图片').slice(0, 30), messages });
       renderSessionList();
     } else {
       updateSession(currentSessionId, { messages });
@@ -2950,20 +3059,25 @@ ${dialogText}
     await callApi(messages);
   }
 
-  // ── Image handling ──
-  function addImageToPreview(base64, mediaType, dataUrl) {
-    pendingImages.push({ base64, mediaType, dataUrl });
+  // ── Attachment handling ──
+  function formatFileSize(size) {
+    if (!size) return '';
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function addImageToPreview(imageData) {
+    pendingImages.push(imageData);
     const bar = document.getElementById('image-preview-bar');
     const thumb = document.createElement('div');
     thumb.className = 'img-thumb';
     const img = document.createElement('img');
-    img.src = dataUrl;
+    img.src = imageData.dataUrl;
     const removeBtn = document.createElement('button');
     removeBtn.className = 'img-thumb-remove';
     removeBtn.textContent = '×';
-    const idx = pendingImages.length - 1;
     removeBtn.addEventListener('click', () => {
-      pendingImages.splice(pendingImages.indexOf(pendingImages[idx]), 1);
+      pendingImages = pendingImages.filter(item => item !== imageData);
       thumb.remove();
     });
     thumb.appendChild(img);
@@ -2971,9 +3085,123 @@ ${dialogText}
     bar.appendChild(thumb);
   }
 
+  function addFileToPreview(fileData) {
+    pendingAttachments.push(fileData);
+    const bar = document.getElementById('image-preview-bar');
+    const thumb = document.createElement('div');
+    thumb.className = 'file-thumb';
+    const name = document.createElement('span');
+    name.className = 'file-thumb-name';
+    name.textContent = fileData.name;
+    const meta = document.createElement('span');
+    meta.className = 'file-thumb-meta';
+    meta.textContent = formatFileSize(fileData.size);
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'img-thumb-remove';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => {
+      pendingAttachments = pendingAttachments.filter(item => item !== fileData);
+      thumb.remove();
+    });
+    thumb.appendChild(name);
+    if (meta.textContent) thumb.appendChild(meta);
+    thumb.appendChild(removeBtn);
+    bar.appendChild(thumb);
+  }
+
   function clearImagePreviews() {
     pendingImages = [];
+    pendingAttachments = [];
     document.getElementById('image-preview-bar').innerHTML = '';
+  }
+
+  function readBlobAsDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function loadImageElement(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('这张图片格式暂时读不了'));
+      };
+      img.src = url;
+    });
+  }
+
+  function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('图片压缩失败')), type, quality);
+    });
+  }
+
+  async function compressImageForClaude(file) {
+    const img = await loadImageElement(file);
+    const maxSide = 1568;
+    const ratio = Math.min(1, maxSide / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+    const width = Math.max(1, Math.round((img.naturalWidth || img.width) * ratio));
+    const height = Math.max(1, Math.round((img.naturalHeight || img.height) * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+
+    let blob = null;
+    for (const quality of [0.86, 0.74, 0.62]) {
+      blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+      if (blob.size <= 3.8 * 1024 * 1024) break;
+    }
+    const dataUrl = await readBlobAsDataUrl(blob);
+    return {
+      base64: dataUrl.split(',')[1],
+      mediaType: 'image/jpeg',
+      dataUrl,
+      size: blob.size,
+      name: file.name || 'photo.jpg',
+    };
+  }
+
+  async function handleSelectedFiles(files) {
+    const validDocs = ['txt', 'md', 'pdf', 'docx'];
+    for (const file of files) {
+      try {
+        if (file.type.startsWith('image/')) {
+          const imageData = await compressImageForClaude(file);
+          addImageToPreview(imageData);
+          continue;
+        }
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (!validDocs.includes(ext)) {
+          appendBubble('assistant', `${file.name} 这个格式暂时不能直接发送`, -1, true);
+          continue;
+        }
+        let content = await extractTextFromFile(file);
+        if (!content.trim()) {
+          appendBubble('assistant', `${file.name} 没有提取到文字`, -1, true);
+          continue;
+        }
+        if (content.length > 12000) {
+          content = content.slice(0, 12000) + '\n\n【文件内容较长，已截取前 12000 字。】';
+        }
+        addFileToPreview({ name: file.name, content, size: file.size });
+      } catch (err) {
+        appendBubble('assistant', `${file.name} 处理失败：${err.message}`, -1, true);
+      }
+    }
   }
 
   // ── Auto-resize textarea ──
@@ -3100,22 +3328,23 @@ ${dialogText}
     e.target.value = '';
   });
 
-  // ── Attach image ──
+  // ── Attach image/file/camera ──
   document.getElementById('attach-btn').addEventListener('click', () => {
     document.getElementById('file-input').click();
   });
+  document.getElementById('camera-btn').addEventListener('click', () => {
+    document.getElementById('camera-input').click();
+  });
 
-  document.getElementById('file-input').addEventListener('change', function(e) {
+  document.getElementById('file-input').addEventListener('change', async function(e) {
     const files = Array.from(e.target.files);
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = ev => {
-        const dataUrl = ev.target.result;
-        const base64 = dataUrl.split(',')[1];
-        addImageToPreview(base64, file.type, dataUrl);
-      };
-      reader.readAsDataURL(file);
-    });
+    await handleSelectedFiles(files);
+    e.target.value = '';
+  });
+
+  document.getElementById('camera-input').addEventListener('change', async function(e) {
+    const files = Array.from(e.target.files);
+    await handleSelectedFiles(files);
     e.target.value = '';
   });
 
