@@ -483,8 +483,7 @@
       gap: 10px;
       align-items: flex-end;
     }
-    #attach-btn,
-    #camera-btn {
+    #attach-btn {
       background: none;
       border: none;
       color: #666;
@@ -497,8 +496,7 @@
       display: flex;
       align-items: center;
     }
-    #attach-btn:hover,
-    #camera-btn:hover { color: #e8e8e8; }
+    #attach-btn:hover { color: #e8e8e8; }
     #image-preview-bar {
       display: flex;
       gap: 8px;
@@ -1000,9 +998,7 @@
     <div id="image-preview-bar"></div>
     <div id="input-row">
       <button id="attach-btn" title="上传图片或文件">📎</button>
-      <button id="camera-btn" title="拍照">📷</button>
       <input id="file-input" type="file" accept="image/*,.txt,.md,.pdf,.docx" multiple style="display:none" />
-      <input id="camera-input" type="file" accept="image/*" capture="environment" style="display:none" />
       <textarea id="user-input" placeholder="说点什么…" rows="1"></textarea>
       <button id="send-btn">↑</button>
     </div>
@@ -1086,7 +1082,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-session-sync-schema-fix';
+  const APP_VERSION = '2026-07-05-single-attachment-entry';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -3334,21 +3330,12 @@ ${dialogText}
     e.target.value = '';
   });
 
-  // ── Attach image/file/camera ──
+  // ── Attach image/file ──
   document.getElementById('attach-btn').addEventListener('click', () => {
     document.getElementById('file-input').click();
   });
-  document.getElementById('camera-btn').addEventListener('click', () => {
-    document.getElementById('camera-input').click();
-  });
 
   document.getElementById('file-input').addEventListener('change', async function(e) {
-    const files = Array.from(e.target.files);
-    await handleSelectedFiles(files);
-    e.target.value = '';
-  });
-
-  document.getElementById('camera-input').addEventListener('change', async function(e) {
     const files = Array.from(e.target.files);
     await handleSelectedFiles(files);
     e.target.value = '';
