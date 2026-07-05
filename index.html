@@ -274,26 +274,56 @@
     }
     .msg-row:hover .msg-actions { opacity: 1; }
     .msg-action-btn {
-      background: none;
-      border: none;
-      color: #555;
+      background: #151515;
+      border: 1px solid transparent;
+      color: #8a8a8a;
       cursor: pointer;
-      font-size: 14px;
-      padding: 3px 4px;
-      border-radius: 4px;
+      padding: 0;
+      border-radius: 8px;
       line-height: 1;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
+      width: 30px;
+      height: 30px;
+      transition: color .15s ease, background .15s ease, border-color .15s ease;
     }
-    .msg-action-btn:hover { color: #e8e8e8; background: #252525; }
+    .msg-action-btn svg {
+      width: 17px;
+      height: 17px;
+      stroke: currentColor;
+      stroke-width: 1.7;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .msg-action-btn:hover {
+      color: #e8e8e8;
+      background: #202020;
+      border-color: #303030;
+    }
+    .msg-action-delete { color: #555; }
+    .msg-action-delete:hover {
+      color: #ff6b6b;
+      background: #211616;
+      border-color: #3a2020;
+    }
 
     /* ── Edit mode ── */
-    .edit-wrapper { flex: 1; display: flex; flex-direction: column; gap: 6px; max-width: calc(100% - 90px); }
+    .edit-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: min(560px, calc(100vw - 110px));
+      max-width: calc(100% - 90px);
+      background: #181818;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 10px;
+    }
     .edit-textarea {
-      background: #1a1a1a;
+      background: #111;
       border: 1px solid #3a3a3a;
       border-radius: 10px;
       color: #e8e8e8;
@@ -304,7 +334,9 @@
       font-family: inherit;
       line-height: 1.6;
       width: 100%;
-      min-height: 60px;
+      min-height: 120px;
+      max-height: 280px;
+      overflow-y: auto;
     }
     .edit-btns { display: flex; gap: 6px; justify-content: flex-end; }
     .edit-cancel {
@@ -850,6 +882,11 @@
 
       /* Message actions: always show on mobile (no hover) */
       .msg-actions { opacity: 1; }
+      .edit-wrapper {
+        width: calc(100vw - 72px);
+        max-width: calc(100vw - 72px);
+      }
+      .edit-textarea { min-height: 140px; }
 
       /* Input bar */
       #input-bar { padding: 10px 12px; }
@@ -1018,7 +1055,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-thought-profile-style';
+  const APP_VERSION = '2026-07-05-claude-action-buttons';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2519,15 +2556,14 @@ ${dialogText}
 
     if (msgIdx >= 0 && !isError) {
       if (role === 'user') {
-        const editBtn = makeActionBtn('✏️', '编辑', () => startEdit(row, bubble, msgIdx));
+        const editBtn = makeActionBtn('edit', '编辑', () => startEdit(row, bubble, msgIdx));
         actions.appendChild(editBtn);
       }
       if (role === 'assistant') {
-        const regenBtn = makeActionBtn('↩', '重新生成', () => regenMsg(msgIdx));
+        const regenBtn = makeActionBtn('regen', '重新生成', () => regenMsg(msgIdx));
         actions.appendChild(regenBtn);
       }
-      const delBtn = makeActionBtn('✕', '删除此条及之后', () => deleteMsg(msgIdx));
-      delBtn.style.color = '#444';
+      const delBtn = makeActionBtn('delete', '删除此条及之后', () => deleteMsg(msgIdx));
       actions.appendChild(delBtn);
     }
 
@@ -2546,11 +2582,22 @@ ${dialogText}
     return bubble;
   }
 
-  function makeActionBtn(icon, title, onClick) {
+  function getActionIcon(name) {
+    const icons = {
+      edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.7 4.3a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 20.5l2-4L15.7 4.3Z"></path><path d="m14.5 5.5 3 3"></path></svg>',
+      regen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><path d="M20 4v6h-6"></path></svg>',
+      delete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>',
+    };
+    return icons[name] || '';
+  }
+
+  function makeActionBtn(iconName, title, onClick) {
     const btn = document.createElement('button');
-    btn.className = 'msg-action-btn';
+    btn.className = `msg-action-btn msg-action-${iconName}`;
+    btn.type = 'button';
     btn.title = title;
-    btn.textContent = icon;
+    btn.setAttribute('aria-label', title);
+    btn.innerHTML = getActionIcon(iconName);
     btn.addEventListener('click', onClick);
     return btn;
   }
@@ -2564,6 +2611,10 @@ ${dialogText}
     ta.className = 'edit-textarea';
     ta.value = originalText;
     ta.rows = Math.max(2, Math.min(originalText.split('\n').length + 1, 8));
+    const resizeEditTextarea = () => {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.max(120, Math.min(ta.scrollHeight, 280))}px`;
+    };
 
     const btns = document.createElement('div');
     btns.className = 'edit-btns';
@@ -2587,6 +2638,7 @@ ${dialogText}
     bubble.replaceWith(wrapper);
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
+    requestAnimationFrame(resizeEditTextarea);
 
     cancelBtn.addEventListener('click', () => wrapper.replaceWith(bubble));
 
@@ -2601,6 +2653,7 @@ ${dialogText}
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirmBtn.click(); }
       if (e.key === 'Escape') cancelBtn.click();
     });
+    ta.addEventListener('input', resizeEditTextarea);
   }
 
   // ── Message actions ──
