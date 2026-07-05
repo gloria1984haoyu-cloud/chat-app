@@ -31,7 +31,7 @@ export default async function handler(req) {
     const apiKey = req.headers.get('x-api-key');
     const baseUrl = req.headers.get('x-base-url') || 'https://ai.aiclick.cc';
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 45000);
+    const timer = setTimeout(() => ctrl.abort(), 55000);
 
     let response;
     try {
