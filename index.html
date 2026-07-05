@@ -1082,7 +1082,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-05-thought-process-guard';
+  const APP_VERSION = '2026-07-05-chat-timeout-errors';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2897,9 +2897,18 @@ ${dialogText}
           signal: ctrl.signal,
         });
         clearTimeout(timer);
+        const raw = await res.text();
         let data = {};
-        try { data = await res.json(); }
-        catch { data = { error: { message: 'Invalid JSON response' } }; }
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch {
+          data = {
+            error: {
+              message: `服务返回了非 JSON 响应（HTTP ${res.status}）。通常是代理或中转站超时。`,
+              preview: raw.slice(0, 200),
+            },
+          };
+        }
         if (attempt < retries && isRetryableChatFailure(res, data, null)) {
           await delay(CHAT_RETRY_DELAY_MS);
           continue;
@@ -2911,6 +2920,12 @@ ${dialogText}
         if (attempt < retries && isRetryableChatFailure(null, null, err)) {
           await delay(CHAT_RETRY_DELAY_MS);
           continue;
+        }
+        if (err?.message === 'Failed to fetch') {
+          throw new Error('请求连接中断。通常是网络波动、代理超时，或中转站没有完整返回。');
+        }
+        if (err?.name === 'AbortError') {
+          throw new Error('请求超时。可以先重试，或者降低思考强度、缩短上下文后再发。');
         }
         throw err;
       }
