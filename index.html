@@ -1087,7 +1087,7 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-06-native-message-actions';
+  const APP_VERSION = '2026-07-06-sync-and-actions-fix';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1926,15 +1926,15 @@ ${dialogText}
   function sessionSortValue(session) {
     const messages = Array.isArray(session.messages) ? session.messages : [];
     const last = messages[messages.length - 1];
-    return Number(session._updated_at || last?.timestamp || session.created_at || session.id || 0);
+    return Number(last?.timestamp || session._updated_at || session.created_at || session.id || 0);
   }
   function isNewerSession(a, b) {
     const aMessages = Array.isArray(a.messages) ? a.messages : [];
     const bMessages = Array.isArray(b.messages) ? b.messages : [];
-    const aUpdated = Number(a._updated_at || 0);
-    const bUpdated = Number(b._updated_at || 0);
-    if (aUpdated || bUpdated) {
-      if (aUpdated !== bUpdated) return aUpdated > bUpdated;
+    const aLast = Number(aMessages[aMessages.length - 1]?.timestamp || 0);
+    const bLast = Number(bMessages[bMessages.length - 1]?.timestamp || 0);
+    if (aLast || bLast) {
+      if (aLast !== bLast) return aLast > bLast;
     }
     const aTime = sessionSortValue(a);
     const bTime = sessionSortValue(b);
@@ -2669,8 +2669,13 @@ ${dialogText}
     actions.className = 'msg-actions';
 
     if (msgIdx >= 0 && !isError) {
-      const editBtn = makeActionBtn('edit', '编辑', () => startEdit(row, bubble, msgIdx, role));
-      actions.appendChild(editBtn);
+      if (role === 'user') {
+        const editBtn = makeActionBtn('edit', '编辑', () => startEdit(row, bubble, msgIdx));
+        actions.appendChild(editBtn);
+      } else {
+        const regenBtn = makeActionBtn('regen', '重新生成', () => regenMsg(msgIdx));
+        actions.appendChild(regenBtn);
+      }
       const delBtn = makeActionBtn('delete', '删除此条及之后', () => deleteMsg(msgIdx));
       actions.appendChild(delBtn);
     }
@@ -2700,6 +2705,7 @@ ${dialogText}
   function getActionIcon(name) {
     const icons = {
       edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2L19.1 9.1a2.8 2.8 0 0 0-4-4L4.2 16 4 20Z"></path><path d="m13.8 6.4 3.8 3.8"></path></svg>',
+      regen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"></path><path d="M19.2 12A7.2 7.2 0 1 0 17 17.2"></path></svg>',
       delete: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M6.5 7l.8 13h9.4l.8-13"></path><path d="M9 7V4h6v3"></path></svg>',
     };
     return icons[name] || '';
@@ -2720,7 +2726,7 @@ ${dialogText}
   }
 
   // ── Inline edit ──
-  function startEdit(row, bubble, msgIdx, role) {
+  function startEdit(row, bubble, msgIdx) {
     if (isLoading) return;
     const originalText = bubble.querySelector('.msg-text')?.textContent || '';
 
@@ -2763,8 +2769,7 @@ ${dialogText}
       const newText = ta.value.trim();
       if (!newText) return;
       wrapper.replaceWith(bubble);
-      if (role === 'user') await editAndResend(msgIdx, newText);
-      else editMessageOnly(msgIdx, newText);
+      await editAndResend(msgIdx, newText);
     });
 
     ta.addEventListener('keydown', e => {
@@ -2783,6 +2788,14 @@ ${dialogText}
     });
   }
 
+  async function regenMsg(msgIdx) {
+    if (isLoading) return;
+    const messages = truncateAt(msgIdx);
+    removeDomFrom(msgIdx);
+    if (messages.length === 0) return;
+    await callApi(messages);
+  }
+
   async function editAndResend(msgIdx, newText) {
     if (isLoading) return;
     const session = getSession(currentSessionId);
@@ -2795,16 +2808,6 @@ ${dialogText}
     messages.push({ role: 'user', content: newText, timestamp: originalTs });
     updateSession(currentSessionId, { messages });
     await callApi(messages);
-  }
-
-  function editMessageOnly(msgIdx, newText) {
-    const session = getSession(currentSessionId);
-    const messages = Array.isArray(session?.messages) ? session.messages.slice() : [];
-    const original = messages[msgIdx];
-    if (!original) return;
-    messages[msgIdx] = { ...original, content: newText, timestamp: original.timestamp || Date.now() };
-    updateSession(currentSessionId, { messages });
-    loadSession(currentSessionId);
   }
 
   function buildThinkingConfig(model, enabled, budget) {
