@@ -31,6 +31,17 @@ export default async function handler(req) {
       body: JSON.stringify(body),
     });
 
+    if (body.stream && response.body) {
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          'Content-Type': response.headers.get('Content-Type') || 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
     const data = await response.text();
 
     return new Response(data, {
