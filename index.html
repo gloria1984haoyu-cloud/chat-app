@@ -145,6 +145,21 @@
     .session-item:hover .session-action { opacity: 1; }
     .session-rename:hover { color: #e8e8e8; background: #252525; }
     .session-delete:hover { color: #ff6b6b; background: #2a1a1a; }
+    .session-memory-mode {
+      border: 1px solid #333;
+      background: #171717;
+      color: #777;
+      cursor: pointer;
+      border-radius: 999px;
+      font-size: 10px;
+      line-height: 1;
+      padding: 4px 7px;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .session-memory-mode:hover { color: #ddd; border-color: #555; }
+    .session-memory-mode.immersive { color: #d8b986; border-color: #5b4425; background: #211a10; }
+    .session-memory-mode.off { color: #999; border-color: #444; background: #202020; }
 
     /* ── Main area ── */
     #main {
@@ -1088,7 +1103,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-09-session-summary';
+  const APP_VERSION = '2026-07-09-memory-mode';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1234,6 +1249,8 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
         title: session.title || '新对话',
         messages: Array.isArray(session.messages) ? session.messages : [],
         created_at: Number(session.created_at || session.id || Date.now()),
+        memory_mode: normalizeMemoryMode(session.memory_mode),
+        memory_mode_updated_at: Number(session.memory_mode_updated_at || 0),
       };
       const payload = JSON.stringify(safeSession);
       const res = await fetch(`${SB_URL}/rest/v1/sessions`, {
@@ -2038,10 +2055,29 @@ ${dialogText}
     }
     return session;
   }
+  function normalizeMemoryMode(mode) {
+    return ['normal', 'immersive', 'off'].includes(mode) ? mode : 'normal';
+  }
+  function mergeSessionMemoryMode(session, other) {
+    if (!session || !other) return session;
+    const sessionModeUpdated = Number(session.memory_mode_updated_at || 0);
+    const otherModeUpdated = Number(other.memory_mode_updated_at || 0);
+    if (otherModeUpdated > sessionModeUpdated) {
+      return {
+        ...session,
+        memory_mode: normalizeMemoryMode(other.memory_mode),
+        memory_mode_updated_at: otherModeUpdated,
+      };
+    }
+    return {
+      ...session,
+      memory_mode: normalizeMemoryMode(session.memory_mode),
+    };
+  }
   function mergeSessionState(base, incoming) {
     if (!base) return incoming;
-    if (isNewerSession(incoming, base)) return mergeSessionSummaryState(mergeUnreadState(incoming, base), base);
-    return mergeSessionSummaryState(mergeUnreadState(base, incoming), incoming);
+    if (isNewerSession(incoming, base)) return mergeSessionMemoryMode(mergeSessionSummaryState(mergeUnreadState(incoming, base), base), base);
+    return mergeSessionMemoryMode(mergeSessionSummaryState(mergeUnreadState(base, incoming), incoming), incoming);
   }
   function mergeSessions(localSessions = [], cloudSessions = []) {
     const byId = new Map();
@@ -2391,6 +2427,25 @@ ${dialogText}
     renameSession(session.id, nextTitle);
   }
 
+  function getMemoryModeMeta(mode) {
+    const normalized = normalizeMemoryMode(mode);
+    const map = {
+      normal: { label: '记忆', title: '普通模式：正常使用记忆库和偏好库', next: 'immersive' },
+      immersive: { label: '沉浸', title: '沉浸模式：不主动把现实记忆带进剧情', next: 'off' },
+      off: { label: '无记忆', title: '关闭记忆：本窗口不带全局记忆库和偏好库', next: 'normal' },
+    };
+    return map[normalized];
+  }
+
+  function toggleSessionMemoryMode(session) {
+    const meta = getMemoryModeMeta(session.memory_mode);
+    updateSession(session.id, {
+      memory_mode: meta.next,
+      memory_mode_updated_at: Date.now(),
+    });
+    renderSessionList();
+  }
+
   function markSessionRead(id) {
     const session = getSession(id);
     if (!session || !Number(session.unread_count || 0)) return;
@@ -2605,6 +2660,17 @@ ${summary}`;
         unread.title = `${unreadCount} 条未读`;
       }
 
+      const memoryModeMeta = getMemoryModeMeta(s.memory_mode);
+      const memoryModeBtn = document.createElement('button');
+      memoryModeBtn.className = 'session-memory-mode ' + normalizeMemoryMode(s.memory_mode);
+      memoryModeBtn.type = 'button';
+      memoryModeBtn.textContent = memoryModeMeta.label;
+      memoryModeBtn.title = memoryModeMeta.title;
+      memoryModeBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleSessionMemoryMode(s);
+      });
+
       const rename = document.createElement('button');
       rename.className = 'session-action session-rename';
       rename.textContent = '✎';
@@ -2625,6 +2691,7 @@ ${summary}`;
 
       item.appendChild(title);
       if (unread) item.appendChild(unread);
+      item.appendChild(memoryModeBtn);
       item.appendChild(rename);
       item.appendChild(del);
       item.addEventListener('click', () => {
@@ -3116,6 +3183,7 @@ ${previousSummary ? `已有旧摘要：\n${previousSummary}\n\n` : ''}需要并�
     const thinkingBudget = normalizeThinkingBudget(cfg.thinking_budget);
     let system = cfg.system || document.getElementById('cfg-system').value || '';
     const currentSessionForContext = getSession(currentSessionId);
+    const memoryMode = normalizeMemoryMode(currentSessionForContext?.memory_mode);
     const summaryBlock = buildWindowSummaryBlock(currentSessionForContext);
     if (summaryBlock) {
       system = system ? system + '\n\n' + summaryBlock : summaryBlock;
@@ -3124,14 +3192,20 @@ ${previousSummary ? `已有旧摘要：\n${previousSummary}\n\n` : ''}需要并�
       const filesContext = pinnedFiles.map(f => `【${f.name}】\n${f.content}`).join('\n\n---\n\n');
       system = system ? system + '\n\n以下是用户的固定文件，请在对话中参考：\n\n' + filesContext : '以下是用户的固定文件，请在对话中参考：\n\n' + filesContext;
     }
-    if (memories.length > 0) {
+    if (memoryMode !== 'off' && memories.length > 0) {
       const memText = memories.map(m => `- ${m.content}`).join('\n');
-      const memBlock = '【记忆库】以下是关于用户的重要信息，请在对话中自然地参考：\n' + memText;
+      const memIntro = memoryMode === 'immersive'
+        ? '【记忆库】以下是关于小雨的长期现实信息。当前窗口处于沉浸模式，当前剧情和即时语境优先。不要主动提起不相关的现实事项，不要把求职、简历、投递、账号、项目等现实信息带进角色扮演；只有小雨明确把现实话题带进来时才参考：\n'
+        : '【记忆库】以下是关于用户的重要信息，请在对话中自然地参考：\n';
+      const memBlock = memIntro + memText;
       system = system ? system + '\n\n' + memBlock : memBlock;
     }
-    if (preferences.length > 0) {
+    if (memoryMode !== 'off' && preferences.length > 0) {
       const prefText = preferences.map(p => `- ${p.content}`).join('\n');
-      const prefBlock = '【我的偏好】以下是我的兴趣爱好和想法：\n' + prefText;
+      const prefIntro = memoryMode === 'immersive'
+        ? '【我的偏好】以下是黎川的长期偏好。当前窗口处于沉浸模式，只能作为隐藏背景，不要为了使用偏好而打断剧情和沉浸感：\n'
+        : '【我的偏好】以下是我的兴趣爱好和想法：\n';
+      const prefBlock = prefIntro + prefText;
       system = system ? system + '\n\n' + prefBlock : prefBlock;
     }
     // 注入环境信息到最前面（并行请求，失败静默）
