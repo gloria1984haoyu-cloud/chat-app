@@ -1086,8 +1086,9 @@
   const CLOUD_CONFIG_FILE_ID = '__lucian_cloud_config__';
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
+  const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-06-sync-and-actions-fix';
+  const APP_VERSION = '2026-07-09-session-summary';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1192,6 +1193,10 @@
   const CHAT_REQUEST_TIMEOUT_MS = 90000;
   const CHAT_RETRY_DELAY_MS = 900;
   const EXTRACTION_MODEL = 'claude-haiku-4-5-20251001';
+  const RECENT_CONTEXT_MESSAGE_COUNT = 80;
+  const SUMMARY_AUTO_MESSAGE_THRESHOLD = 300;
+  const SUMMARY_TARGET_CHARS = 3000;
+  const SUMMARY_SOURCE_CHARS = 26000;
   const THOUGHT_OS_PROMPT = `以下只约束 Thought process，不属于最终回复正文。
 
 必须是中文的思考链，绝对禁止其他语言的思考链。思考链里不要称呼“用户”，而是“小雨”。思考链里要以“我”的视角展开，不要想我该怎么样、要怎么样、会怎么样，直接表现出来怎么样就行。
@@ -1273,6 +1278,62 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
         method: 'DELETE', headers: sbHeaders(),
       });
     } catch {}
+  }
+
+  function sessionSummaryFileId(sessionId) {
+    return `${SESSION_SUMMARY_FILE_PREFIX}${sessionId}`;
+  }
+
+  function parseSessionSummaryFile(row) {
+    if (!row?.content) return null;
+    try {
+      const data = JSON.parse(row.content);
+      if (!data || !data.session_id) return null;
+      return {
+        summary: String(data.summary || '').trim(),
+        summary_until_index: Number(data.summary_until_index || 0),
+        summary_updated_at: Number(data.summary_updated_at || row.created_at || 0),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function sbFetchSessionSummary(sessionId) {
+    try {
+      const id = sessionSummaryFileId(sessionId);
+      const res = await fetch(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}&select=*`, { headers: sbHeaders() });
+      if (!res.ok) return null;
+      const rows = await res.json();
+      return parseSessionSummaryFile(rows?.[0]);
+    } catch {
+      return null;
+    }
+  }
+
+  async function sbUpsertSessionSummary(session) {
+    if (!session?.id || !String(session.summary || '').trim()) return false;
+    const updatedAt = Number(session.summary_updated_at || Date.now());
+    try {
+      await sbUpsertFile({
+        id: sessionSummaryFileId(session.id),
+        name: `.lucian-session-summary-${session.id}.json`,
+        content: JSON.stringify({
+          session_id: session.id,
+          summary: String(session.summary || '').trim(),
+          summary_until_index: Number(session.summary_until_index || 0),
+          summary_updated_at: updatedAt,
+        }),
+        created_at: updatedAt,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function sbDeleteSessionSummary(sessionId) {
+    await sbDeleteFile(sessionSummaryFileId(sessionId));
   }
 
   async function sbFetchCloudConfig() {
@@ -1595,7 +1656,11 @@ ${dialogText}
   }
 
   async function loadFiles() {
-    pinnedFiles = (await sbFetchFiles()).filter(f => f.id !== CLOUD_CONFIG_FILE_ID && f.id !== PUSH_SUBSCRIPTIONS_FILE_ID);
+    pinnedFiles = (await sbFetchFiles()).filter(f =>
+      f.id !== CLOUD_CONFIG_FILE_ID &&
+      f.id !== PUSH_SUBSCRIPTIONS_FILE_ID &&
+      !String(f.id || '').startsWith(SESSION_SUMMARY_FILE_PREFIX)
+    );
     renderFilesList();
   }
 
@@ -1959,10 +2024,24 @@ ${dialogText}
     }
     return session;
   }
+  function mergeSessionSummaryState(session, other) {
+    if (!session || !other) return session;
+    const sessionSummaryUpdated = Number(session.summary_updated_at || 0);
+    const otherSummaryUpdated = Number(other.summary_updated_at || 0);
+    if (otherSummaryUpdated > sessionSummaryUpdated) {
+      return {
+        ...session,
+        summary: other.summary || '',
+        summary_until_index: Number(other.summary_until_index || 0),
+        summary_updated_at: otherSummaryUpdated,
+      };
+    }
+    return session;
+  }
   function mergeSessionState(base, incoming) {
     if (!base) return incoming;
-    if (isNewerSession(incoming, base)) return mergeUnreadState(incoming, base);
-    return mergeUnreadState(base, incoming);
+    if (isNewerSession(incoming, base)) return mergeSessionSummaryState(mergeUnreadState(incoming, base), base);
+    return mergeSessionSummaryState(mergeUnreadState(base, incoming), incoming);
   }
   function mergeSessions(localSessions = [], cloudSessions = []) {
     const byId = new Map();
@@ -2172,6 +2251,7 @@ ${dialogText}
   let currentView = 'chat';
   let isLoading = false;
   let activeActionMessageKey = null;
+  const summarizingSessionIds = new Set();
   let pendingImages = []; // [{base64, mediaType, dataUrl}]
   let pendingAttachments = []; // [{name, content, size}]
 
@@ -2261,6 +2341,16 @@ ${dialogText}
     }
   }
 
+  async function hydrateSessionSummary(id) {
+    if (!id) return;
+    const cloudSummary = await sbFetchSessionSummary(id);
+    if (!cloudSummary?.summary) return;
+    const session = getSession(id);
+    if (!session) return;
+    if (Number(cloudSummary.summary_updated_at || 0) <= Number(session.summary_updated_at || 0)) return;
+    updateSession(id, cloudSummary);
+  }
+
   function showConfirm(msg, onOk) {
     const overlay = document.getElementById('confirm-overlay');
     document.getElementById('confirm-msg').textContent = msg;
@@ -2278,6 +2368,7 @@ ${dialogText}
     const sessions = getSessions().filter(s => s.id !== id);
     saveSessions(sessions);
     sbDeleteSession(id);
+    sbDeleteSessionSummary(id);
     if (currentSessionId === id) {
       currentSessionId = null;
       chatArea.innerHTML = '';
@@ -2381,7 +2472,7 @@ ${dialogText}
   }
 
   function buildApiMessages(messages) {
-    const recent = messages.slice(-80);
+    const recent = messages.slice(-RECENT_CONTEXT_MESSAGE_COUNT);
     let lastImageMessageIndex = -1;
     for (let i = recent.length - 1; i >= 0; i--) {
       if (recent[i]?.role === 'user' && contentHasImages(recent[i].content)) {
@@ -2393,6 +2484,42 @@ ${dialogText}
       role: message.role,
       content: normalizeApiContent(message.content, index === lastImageMessageIndex),
     }));
+  }
+
+  function buildWindowSummaryBlock(session) {
+    const summary = String(session?.summary || '').trim();
+    if (!summary) return '';
+    return `【当前聊天窗口长期摘要】
+以下是这个窗口较早对话压缩后的长期背景。它不是新消息，而是为了保持连续性：
+${summary}`;
+  }
+
+  function formatMessageForSummary(message) {
+    const role = message.role === 'assistant' ? '黎川' : '小雨';
+    const text = getContentText(message.content).trim();
+    const imageCount = getContentImageUrls(message.content).length;
+    const parts = [];
+    if (text) parts.push(text);
+    if (imageCount > 0) parts.push(`【${imageCount}张图片】`);
+    return `${role}: ${parts.join('\n') || '【空消息】'}`;
+  }
+
+  function trimSummarySourceText(text) {
+    if (text.length <= SUMMARY_SOURCE_CHARS) return text;
+    const headLen = Math.floor(SUMMARY_SOURCE_CHARS * 0.45);
+    const tailLen = SUMMARY_SOURCE_CHARS - headLen;
+    return text.slice(0, headLen) +
+      '\n\n【中间有一段较长旧对话被省略，请根据前后内容提取稳定事实，不要编造。】\n\n' +
+      text.slice(-tailLen);
+  }
+
+  function getSummaryRange(session) {
+    const messages = Array.isArray(session?.messages) ? session.messages : [];
+    const coveredUntil = Number(session.summary_until_index || 0);
+    const targetUntil = Math.max(0, messages.length - RECENT_CONTEXT_MESSAGE_COUNT);
+    if (targetUntil <= coveredUntil) return null;
+    if (targetUntil - coveredUntil < SUMMARY_AUTO_MESSAGE_THRESHOLD) return null;
+    return { coveredUntil, targetUntil, messages: messages.slice(coveredUntil, targetUntil) };
   }
 
   function showMemoryPage() {
@@ -2512,6 +2639,7 @@ ${dialogText}
     currentView = 'chat';
     currentSessionId = id;
     markSessionRead(id);
+    hydrateSessionSummary(id).catch(() => {});
     const session = getSession(id);
     if (!session) return;
     renderSessionMessages(session, Math.max(0, (session.messages || []).length - MESSAGE_BATCH_SIZE), false);
@@ -2550,7 +2678,14 @@ ${dialogText}
   function truncateAt(fromIdx) {
     const session = getSession(currentSessionId);
     const messages = (session.messages || []).slice(0, fromIdx);
-    updateSession(currentSessionId, { messages });
+    const patch = { messages };
+    if (Number(session.summary_until_index || 0) > messages.length) {
+      patch.summary = '';
+      patch.summary_until_index = 0;
+      patch.summary_updated_at = Date.now();
+      sbDeleteSessionSummary(currentSessionId);
+    }
+    updateSession(currentSessionId, patch);
     return messages;
   }
 
@@ -2909,6 +3044,67 @@ ${dialogText}
     throw lastErr || new Error('网络超时');
   }
 
+  async function maybeSummarizeSessionInBackground(sessionId) {
+    if (!sessionId || summarizingSessionIds.has(sessionId)) return;
+    const session = getSession(sessionId);
+    const range = getSummaryRange(session);
+    if (!range) return;
+
+    const cfg = getConfig();
+    const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
+    const key = (cfg.key || oldCfg.key || document.getElementById('cfg-key').value || '').trim();
+    const base = (cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc').trim();
+    if (!key) return;
+
+    summarizingSessionIds.add(sessionId);
+    try {
+      const previousSummary = String(session.summary || '').trim();
+      const sourceText = trimSummarySourceText(range.messages.map(formatMessageForSummary).join('\n\n'));
+      const prompt = `请为一个长期聊天窗口更新“窗口长期摘要”。这个摘要会在未来每次回复时作为背景使用。
+
+要求：
+- 只保留对未来对话有帮助的信息，不要流水账。
+- 保留小雨和黎川之间的关系状态、重要事件、未完成话题、承诺、矛盾、情绪变化、称呼、边界、偏好、雷点。
+- 保留具体事实，比如时间、地点、人物、工作/身体/生活状态、长期剧情线索。
+- 不要把最近正在聊的即时上下文写得过细，因为最近 80 条原文会单独提供。
+- 不要编造，不要评价，不要写成列表模板。
+- 输出简体中文，控制在 ${SUMMARY_TARGET_CHARS} 字以内。
+
+${previousSummary ? `已有旧摘要：\n${previousSummary}\n\n` : ''}需要并入摘要的旧对话：\n${sourceText}
+
+请直接输出更新后的窗口长期摘要。`;
+
+      const { res, data } = await fetchChatJson({
+        key,
+        base,
+        retries: 0,
+        body: {
+          model: EXTRACTION_MODEL,
+          max_tokens: 1400,
+          messages: [{ role: 'user', content: prompt }],
+        },
+      });
+      if (!res.ok || data.error) return;
+
+      const text = (data.content?.[0]?.text || '').trim().slice(0, SUMMARY_TARGET_CHARS + 500);
+      if (!text) return;
+      const current = getSession(sessionId);
+      if (!current) return;
+      const nextPatch = {
+        summary: text,
+        summary_until_index: range.targetUntil,
+        summary_updated_at: Date.now(),
+      };
+      updateSession(sessionId, nextPatch);
+      const updated = getSession(sessionId);
+      if (updated) await sbUpsertSessionSummary(updated);
+    } catch {
+      // 后台摘要失败不影响当前聊天。
+    } finally {
+      summarizingSessionIds.delete(sessionId);
+    }
+  }
+
   // ── API call (shared) ──
   async function callApi(messages) {
     const cfg = getConfig();
@@ -2919,6 +3115,11 @@ ${dialogText}
     const thinkingEnabled = isThinkingEnabled(cfg);
     const thinkingBudget = normalizeThinkingBudget(cfg.thinking_budget);
     let system = cfg.system || document.getElementById('cfg-system').value || '';
+    const currentSessionForContext = getSession(currentSessionId);
+    const summaryBlock = buildWindowSummaryBlock(currentSessionForContext);
+    if (summaryBlock) {
+      system = system ? system + '\n\n' + summaryBlock : summaryBlock;
+    }
     if (pinnedFiles.length > 0) {
       const filesContext = pinnedFiles.map(f => `【${f.name}】\n${f.content}`).join('\n\n---\n\n');
       system = system ? system + '\n\n以下是用户的固定文件，请在对话中参考：\n\n' + filesContext : '以下是用户的固定文件，请在对话中参考：\n\n' + filesContext;
@@ -2982,6 +3183,7 @@ ${dialogText}
         appendBubble('assistant', reply, msgs.length, false, [], assistantTs, parsed.thinking);
         msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, timestamp: assistantTs });
         updateSession(currentSessionId, { messages: msgs });
+        maybeSummarizeSessionInBackground(currentSessionId);
         // 对话结束后异步提取偏好
         maybeExtractPreferences();
       }
