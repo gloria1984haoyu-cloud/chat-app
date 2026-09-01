@@ -1103,7 +1103,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-07-09-stream-chat';
+  const APP_VERSION = '2026-09-02-json-error-guard';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1276,9 +1276,9 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   async function sbFetchFiles() {
     try {
       const res = await fetch(`${SB_URL}/rest/v1/files?select=*&order=created_at.asc`, { headers: sbHeaders() });
-      if (!res.ok) return [];
+      if (!res.ok) return null;
       return await res.json();
-    } catch { return []; }
+    } catch { return null; }
   }
   async function sbUpsertFile(file) {
     try {
@@ -1385,9 +1385,9 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   async function sbFetchMemory() {
     try {
       const res = await fetch(`${SB_URL}/rest/v1/memory?select=*&order=created_at.desc`, { headers: sbHeaders() });
-      if (!res.ok) return [];
+      if (!res.ok) return null;
       return await res.json();
-    } catch { return []; }
+    } catch { return null; }
   }
   async function sbUpsertMemory(item) {
     try {
@@ -1502,6 +1502,19 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   let pinnedFiles = []; // [{id, name, content}]
   let memories = []; // [{id, content, importance, created_at, last_mentioned}]
   let preferences = []; // [{id, content, category, created_at, updated_at}]
+
+  function readCachedList(key) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(value) ? value : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function writeCachedList(key, value) {
+    localStorage.setItem(key, JSON.stringify(Array.isArray(value) ? value : []));
+  }
 
   // ── Preferences library ──
   async function loadPreferences() {
@@ -1673,11 +1686,14 @@ ${dialogText}
   }
 
   async function loadFiles() {
-    pinnedFiles = (await sbFetchFiles()).filter(f =>
+    const raw = await sbFetchFiles();
+    const source = Array.isArray(raw) ? raw : readCachedList(PINNED_FILES_CACHE_KEY);
+    pinnedFiles = source.filter(f =>
       f.id !== CLOUD_CONFIG_FILE_ID &&
       f.id !== PUSH_SUBSCRIPTIONS_FILE_ID &&
       !String(f.id || '').startsWith(SESSION_SUMMARY_FILE_PREFIX)
     );
+    if (Array.isArray(raw)) writeCachedList(PINNED_FILES_CACHE_KEY, pinnedFiles);
     renderFilesList();
   }
 
@@ -1695,6 +1711,7 @@ ${dialogText}
       del.style.cssText = 'background:none;border:none;color:#555;cursor:pointer;font-size:14px;padding:0 2px;';
       del.addEventListener('click', async () => {
         pinnedFiles = pinnedFiles.filter(x => x.id !== f.id);
+        writeCachedList(PINNED_FILES_CACHE_KEY, pinnedFiles);
         await sbDeleteFile(f.id);
         renderFilesList();
       });
@@ -1753,12 +1770,8 @@ ${dialogText}
   // ── Memory library ──
   async function loadMemories() {
     const raw = await sbFetchMemory();
-    const now = Date.now();
-    const sevenDays = 7 * 24 * 60 * 60 * 1000;
-    const active = raw.filter(m => m.importance === 'high' || (now - (m.last_mentioned || m.created_at)) < sevenDays);
-    const expired = raw.filter(m => !active.find(a => a.id === m.id));
-    for (const m of expired) await sbDeleteMemory(m.id);
-    memories = active;
+    memories = Array.isArray(raw) ? raw : readCachedList(MEMORIES_CACHE_KEY);
+    if (Array.isArray(raw)) writeCachedList(MEMORIES_CACHE_KEY, memories);
     renderMemoryList();
     updateNextExtractDisplay();
   }
@@ -1785,6 +1798,7 @@ ${dialogText}
       del.textContent = '×';
       del.addEventListener('click', async () => {
         memories = memories.filter(x => x.id !== m.id);
+        writeCachedList(MEMORIES_CACHE_KEY, memories);
         await sbDeleteMemory(m.id);
         renderMemoryList();
       });
@@ -1889,6 +1903,7 @@ ${dialogText}
           last_mentioned: Date.now(),
         };
         memories.push(item);
+        writeCachedList(MEMORIES_CACHE_KEY, memories);
         await sbUpsertMemory(item);
         added++;
       }
@@ -1906,6 +1921,8 @@ ${dialogText}
   // ── Storage helpers ──
   const SESSIONS_KEY = 'lc-sessions';
   const CONFIG_KEY = 'lc-config';
+  const PINNED_FILES_CACHE_KEY = 'lc-pinned-files-cache';
+  const MEMORIES_CACHE_KEY = 'lc-memories-cache';
 
   function normalizeModelName(model) {
     const raw = String(model || '').trim();
@@ -2584,7 +2601,7 @@ ${summary}`;
         <div class="library-page-header">
           <div>
             <div class="library-page-title">记忆库</div>
-            <div class="library-page-subtitle">保存关于你的重要信息。永久记忆会保留，7天记忆过期后会自动清理。</div>
+            <div class="library-page-subtitle">保存关于你的重要信息。永久记忆会保留，7天记忆不再自动删除。</div>
           </div>
           <div class="library-page-actions">
             <button id="memory-extract-btn">立即更新记忆</button>
@@ -3026,6 +3043,21 @@ ${summary}`;
     return { type: 'adaptive', display: 'summarized' };
   }
 
+  function collectTextFragments(value) {
+    if (!value) return [];
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.flatMap(collectTextFragments);
+    if (typeof value === 'object') {
+      return [
+        ...collectTextFragments(value.text),
+        ...collectTextFragments(value.content),
+        ...collectTextFragments(value.summary),
+        ...collectTextFragments(value.thinking),
+      ];
+    }
+    return [];
+  }
+
   function parseClaudeContent(content) {
     const blocks = Array.isArray(content) ? content : [];
     const text = [];
@@ -3033,21 +3065,13 @@ ${summary}`;
     blocks.forEach(block => {
       if (!block) return;
       if (block.type === 'text' && block.text) text.push(block.text);
-      if ((block.type === 'thinking' || block.type === 'redacted_thinking') && block.thinking) thinking.push(block.thinking);
-      if (block.type === 'thinking' && block.summary) thinking.push(block.summary);
-      if ((block.type === 'reasoning' || block.type === 'summary') && block.text) thinking.push(block.text);
-      if ((block.type === 'reasoning' || block.type === 'summary') && block.content) thinking.push(block.content);
-      if (block.type === 'thinking' && Array.isArray(block.summaries)) {
-        block.summaries.forEach(item => {
-          if (typeof item === 'string') thinking.push(item);
-          else if (item?.text) thinking.push(item.text);
-          else if (item?.summary) thinking.push(item.summary);
-        });
+      if (['thinking', 'redacted_thinking', 'reasoning', 'summary'].includes(block.type)) {
+        thinking.push(...collectTextFragments(block));
       }
     });
     return {
       text: text.join('\n\n').trim(),
-      thinking: thinking.join('\n\n').trim(),
+      thinking: [...new Set(thinking.map(item => item.trim()).filter(Boolean))].join('\n\n').trim(),
     };
   }
 
@@ -3072,6 +3096,25 @@ ${summary}`;
     return res.status === 408 || res.status === 429 || res.status >= 500 || msg.includes('timeout') || msg.includes('timed out');
   }
 
+  function normalizeRawErrorText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+  }
+
+  async function readJsonOrError(res) {
+    const raw = await res.text();
+    if (!raw.trim()) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {
+        error: {
+          message: `返回内容不是 JSON：${normalizeRawErrorText(raw) || '空响应'}`,
+          content_type: res.headers.get('content-type') || '',
+        },
+      };
+    }
+  }
+
   async function fetchChatJson({ key, base, body, retries = 1, timeoutMs = CHAT_REQUEST_TIMEOUT_MS }) {
     let lastErr = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -3090,9 +3133,7 @@ ${summary}`;
           signal: ctrl.signal,
         });
         clearTimeout(timer);
-        let data = {};
-        try { data = await res.json(); }
-        catch { data = { error: { message: 'Invalid JSON response' } }; }
+        const data = await readJsonOrError(res);
         if (attempt < retries && isRetryableChatFailure(res, data, null)) {
           await delay(CHAT_RETRY_DELAY_MS);
           continue;
@@ -3138,6 +3179,11 @@ ${summary}`;
       } else if (delta.type === 'summary_delta') {
         blocks[index].type = blocks[index].type || 'summary';
         blocks[index].text = (blocks[index].text || '') + (delta.summary || delta.text || '');
+      } else if (delta.text || delta.summary || delta.thinking) {
+        const isThoughtDelta = blocks[index]?.type === 'thinking' || blocks[index]?.type === 'summary' || delta.summary || delta.thinking;
+        blocks[index].type = isThoughtDelta ? (blocks[index]?.type || 'summary') : 'text';
+        const key = isThoughtDelta ? 'thinking' : 'text';
+        blocks[index][key] = (blocks[index][key] || '') + (delta.thinking || delta.summary || delta.text || '');
       }
     }
   }
@@ -3145,10 +3191,7 @@ ${summary}`;
   async function readChatStream(res) {
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('text/event-stream')) {
-      let data = {};
-      try { data = await res.json(); }
-      catch { data = { error: { message: 'Invalid JSON response' } }; }
-      return data;
+      return await readJsonOrError(res);
     }
 
     const reader = res.body?.getReader();
@@ -3284,6 +3327,42 @@ ${previousSummary ? `已有旧摘要：\n${previousSummary}\n\n` : ''}需要并�
     }
   }
 
+  async function generateFallbackThinking({ key, base, model, userText, assistantText }) {
+    if (!assistantText.trim()) return '';
+    const prompt = `${THOUGHT_OS_PROMPT}
+
+刚才接口没有返回 Thought process。根据小雨这一句和我已经发出的正文，补写一段自然的中文内心独白。
+
+要求：
+- 只输出 Thought process 内容。
+- 不解释这是补写。
+- 不复述规则。
+- 不改变正文。
+
+小雨：
+${userText || '【无文字内容】'}
+
+我已经发出的正文：
+${assistantText}`;
+
+    try {
+      const { res, data } = await fetchChatJson({
+        key,
+        base,
+        retries: 0,
+        body: {
+          model,
+          max_tokens: 420,
+          messages: [{ role: 'user', content: prompt }],
+        },
+      });
+      if (!res.ok || data.error) return '';
+      return (data.content?.[0]?.text || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
   // ── API call (shared) ──
   async function callApi(messages) {
     const cfg = getConfig();
@@ -3363,11 +3442,22 @@ ${previousSummary ? `已有旧摘要：\n${previousSummary}\n\n` : ''}需要并�
       } else {
         const parsed = parseClaudeContent(data.content);
         const reply = parsed.text || '';
+        const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+        let thinking = parsed.thinking;
+        if (thinkingConfig && !thinking) {
+          thinking = await generateFallbackThinking({
+            key,
+            base,
+            model,
+            userText: getContentText(lastUserMessage?.content || ''),
+            assistantText: reply,
+          });
+        }
         const session = getSession(currentSessionId);
         const msgs = session.messages || [];
         const assistantTs = Date.now();
-        appendBubble('assistant', reply, msgs.length, false, [], assistantTs, parsed.thinking);
-        msgs.push({ role: 'assistant', content: reply, thinking: parsed.thinking, timestamp: assistantTs });
+        appendBubble('assistant', reply, msgs.length, false, [], assistantTs, thinking);
+        msgs.push({ role: 'assistant', content: reply, thinking, timestamp: assistantTs });
         updateSession(currentSessionId, { messages: msgs });
         maybeSummarizeSessionInBackground(currentSessionId);
         // 对话结束后异步提取偏好
@@ -3724,6 +3814,7 @@ ${previousSummary ? `已有旧摘要：\n${previousSummary}\n\n` : ''}需要并�
         if (!content.trim()) { status.style.color = '#ff6b6b'; status.textContent = `${file.name} 无法提取文字`; continue; }
         const f = { id: Date.now().toString() + Math.random().toString(36).slice(2), name: file.name, content, created_at: Date.now() };
         pinnedFiles.push(f);
+        writeCachedList(PINNED_FILES_CACHE_KEY, pinnedFiles);
         await sbUpsertFile(f);
         renderFilesList();
         status.style.color = '#4caf50';
