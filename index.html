@@ -995,6 +995,8 @@
   </div>
   <div class="sidebar-section">
     <button id="nav-chat" class="library-nav-item">对话</button>
+    <button id="cloud-sync-btn" class="library-nav-item" type="button">同步</button>
+    <div id="session-sync-status" style="font-size:11px;color:#666;line-height:1.4;padding:2px 6px;min-height:16px;"></div>
   </div>
   <div id="session-list"></div>
 </div>
@@ -1103,7 +1105,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-09-02-session-sync-first';
+  const APP_VERSION = '2026-09-02-session-sync-repair';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2109,6 +2111,7 @@ ${dialogText}
   }
   async function flushPendingSessionSync() {
     const ids = getPendingSessionSyncIds();
+    setSessionSyncState({ pending: ids.length, local: getSessions().length });
     if (ids.length === 0) return;
     const sessions = getSessions();
     await Promise.all(ids.map(async id => {
@@ -2120,11 +2123,39 @@ ${dialogText}
       const ok = await sbUpsertSession(session);
       if (ok) clearSessionPendingSync(id);
     }));
+    setSessionSyncState({ pending: getPendingSessionSyncIds().length, local: getSessions().length });
+  }
+  async function uploadAllLocalSessionsToCloud() {
+    const sessions = getSessions();
+    if (sessions.length === 0) {
+      setSessionSyncState({ local: 0, uploaded: 0, pending: getPendingSessionSyncIds().length });
+      return 0;
+    }
+    let uploaded = 0;
+    for (const session of sessions) {
+      const ok = await sbUpsertSession(session);
+      if (ok) {
+        clearSessionPendingSync(session.id);
+        uploaded++;
+      } else {
+        markSessionPendingSync(session.id);
+      }
+    }
+    setSessionSyncState({
+      local: sessions.length,
+      uploaded,
+      pending: getPendingSessionSyncIds().length,
+    });
+    return uploaded;
   }
   async function syncSessionsFromCloud({ writeBack = false, refreshCurrent = true } = {}) {
+    setSessionSyncState({ state: 'syncing', local: getSessions().length, pending: getPendingSessionSyncIds().length });
     await flushPendingSessionSync();
     const cloudSessions = await sbFetchSessions();
-    if (!cloudSessions) return false;
+    if (!cloudSessions) {
+      setSessionSyncState({ state: 'error', local: getSessions().length, cloud: null, pending: getPendingSessionSyncIds().length });
+      return false;
+    }
 
     const localSessions = getSessions();
     const previousCurrent = localSessions.find(s => s.id === currentSessionId);
@@ -2150,7 +2181,19 @@ ${dialogText}
     } else if (!currentSessionId && merged.length > 0) {
       loadSession(merged[0].id);
     }
+    setSessionSyncState({ state: 'idle', local: merged.length, cloud: cloudSessions.length, pending: getPendingSessionSyncIds().length });
     return true;
+  }
+  async function syncNow() {
+    if (cloudSyncBtn) cloudSyncBtn.disabled = true;
+    setSessionSyncState({ state: 'syncing', local: getSessions().length, pending: getPendingSessionSyncIds().length });
+    try {
+      const ok = await syncSessionsFromCloud({ writeBack: true, refreshCurrent: true });
+      if (ok) await uploadAllLocalSessionsToCloud();
+    } finally {
+      if (cloudSyncBtn) cloudSyncBtn.disabled = false;
+      renderSessionSyncStatus();
+    }
   }
   function getConfig() {
     return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
@@ -2321,6 +2364,40 @@ ${dialogText}
   const navChat = document.getElementById('nav-chat');
   const navMemory = document.getElementById('nav-memory');
   const navPreferences = document.getElementById('nav-preferences');
+  const cloudSyncBtn = document.getElementById('cloud-sync-btn');
+  const sessionSyncStatus = document.getElementById('session-sync-status');
+  let lastSessionSyncState = {
+    state: 'idle',
+    local: 0,
+    cloud: null,
+    pending: 0,
+    uploaded: 0,
+  };
+
+  function renderSessionSyncStatus() {
+    if (!sessionSyncStatus) return;
+    const { state, local, cloud, pending, uploaded } = lastSessionSyncState;
+    if (state === 'syncing') {
+      sessionSyncStatus.textContent = '同步中…';
+      sessionSyncStatus.style.color = '#888';
+      return;
+    }
+    if (state === 'error') {
+      sessionSyncStatus.textContent = `同步失败，本地 ${local} 个`;
+      sessionSyncStatus.style.color = '#ff8a80';
+      return;
+    }
+    const cloudText = cloud === null ? '云端未知' : `云端 ${cloud} 个`;
+    const pendingText = pending > 0 ? `，待传 ${pending} 个` : '';
+    const uploadText = uploaded > 0 ? `，补传 ${uploaded} 个` : '';
+    sessionSyncStatus.textContent = `本地 ${local} 个，${cloudText}${pendingText}${uploadText}`;
+    sessionSyncStatus.style.color = '#666';
+  }
+
+  function setSessionSyncState(patch) {
+    lastSessionSyncState = { ...lastSessionSyncState, ...patch };
+    renderSessionSyncStatus();
+  }
 
   // ── Init ──
   async function init() {
@@ -2338,6 +2415,7 @@ ${dialogText}
     const localSessions = getSessions();
     renderLibraryNav();
     renderSessionList();
+    renderSessionSyncStatus();
     if (localSessions.length > 0) loadSession(localSessions[0].id);
 
     // 会话同步优先启动，不能被固定文件、记忆库或偏好库的网络请求拖住。
@@ -3715,6 +3793,7 @@ ${assistantText}`;
   navChat.addEventListener('click', showChatPage);
   navMemory.addEventListener('click', showMemoryPage);
   navPreferences.addEventListener('click', showPreferencesPage);
+  cloudSyncBtn?.addEventListener('click', syncNow);
 
   const sidebarOverlay = document.getElementById('sidebar-overlay');
 
