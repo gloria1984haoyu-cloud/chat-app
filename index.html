@@ -1103,7 +1103,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-09-02-json-error-guard';
+  const APP_VERSION = '2026-09-02-session-sync-first';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1237,7 +1237,7 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   }
   async function sbFetchSessions() {
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/sessions?select=*&order=created_at.desc`, { headers: sbHeaders() });
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/sessions?select=*&order=created_at.desc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       return await res.json();
     } catch { return null; }
@@ -1275,7 +1275,7 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   // ── Supabase files ──
   async function sbFetchFiles() {
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/files?select=*&order=created_at.asc`, { headers: sbHeaders() });
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?select=*&order=created_at.asc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       return await res.json();
     } catch { return null; }
@@ -1319,7 +1319,7 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   async function sbFetchSessionSummary(sessionId) {
     try {
       const id = sessionSummaryFileId(sessionId);
-      const res = await fetch(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}&select=*`, { headers: sbHeaders() });
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}&select=*`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       const rows = await res.json();
       return parseSessionSummaryFile(rows?.[0]);
@@ -1355,7 +1355,7 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
 
   async function sbFetchCloudConfig() {
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(CLOUD_CONFIG_FILE_ID)}&select=*`, { headers: sbHeaders() });
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(CLOUD_CONFIG_FILE_ID)}&select=*`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       const rows = await res.json();
       if (!rows?.[0]?.content) return null;
@@ -1384,7 +1384,7 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   // ── Supabase memory ──
   async function sbFetchMemory() {
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/memory?select=*&order=created_at.desc`, { headers: sbHeaders() });
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/memory?select=*&order=created_at.desc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       return await res.json();
     } catch { return null; }
@@ -1409,7 +1409,7 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   // ── Supabase preferences ──
   async function sbFetchPreferences() {
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/preferences?select=*&order=created_at.asc`, { headers: sbHeaders() });
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/preferences?select=*&order=created_at.asc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       return await res.json();
     } catch { return null; }
@@ -1435,10 +1435,12 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   let _cachedEnvContext = null;
   let _envContextExpiry = 0;
 
-  function _fetchWithTimeout(url, ms) {
+  const SB_FETCH_TIMEOUT_MS = 8000;
+
+  function _fetchWithTimeout(url, ms, init = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
-    return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+    return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer));
   }
 
   function _wmoToDesc(code) {
@@ -2338,23 +2340,20 @@ ${dialogText}
     renderSessionList();
     if (localSessions.length > 0) loadSession(localSessions[0].id);
 
-    // 配置同步放到首屏渲染之后，避免手机网络慢时先白屏/黑屏等待。
+    // 会话同步优先启动，不能被固定文件、记忆库或偏好库的网络请求拖住。
+    syncSessionsFromCloud({ writeBack: true }).catch(() => {});
+
+    // 配置和资料库放到后台加载，先保证手机/电脑新聊天能互相看见。
     syncConfigFromCloud().catch(() => {});
+    loadFiles().catch(() => {});
+    loadMemories().then(() => maybeExtractMemories()).catch(() => {});
+    loadPreferences().catch(() => {});
 
-    // 加载固定文件
-    await loadFiles();
-
-    // 加载记忆库
-    await loadMemories();
-    maybeExtractMemories(); // 异步，不阻塞
-
-    // 加载偏好库
-    await loadPreferences();
     // 预热环境信息（并行，不阻塞）
     getEnvContext();
 
-    // 再从云端拉取并合并最新数据。手机和电脑各自有 localStorage，必须以云端为准合并。
-    await syncSessionsFromCloud({ writeBack: true });
+    // 再拉一次兜底。手机和电脑各自有 localStorage，必须以云端为准合并。
+    setTimeout(() => syncSessionsFromCloud({ writeBack: true }).catch(() => {}), 2500);
     setInterval(() => syncSessionsFromCloud({ writeBack: true, refreshCurrent: document.visibilityState === 'visible' }), 20000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') syncSessionsFromCloud({ writeBack: true });
