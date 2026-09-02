@@ -952,8 +952,7 @@
   </div>
   <div class="sidebar-section">
     <button id="nav-chat" class="library-nav-item">对话</button>
-    <button id="cloud-sync-btn" class="library-nav-item" type="button">同步</button>
-    <div id="session-sync-status" style="font-size:11px;color:#666;line-height:1.4;padding:2px 6px;min-height:16px;"></div>
+    <div id="sync-error-pill" style="display:none;font-size:11px;color:#ff8a80;line-height:1.4;padding:2px 6px;min-height:16px;">同步失败</div>
   </div>
   <div id="session-list"></div>
 </div>
@@ -1031,6 +1030,13 @@
     <div id="push-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
   </div>
 
+  <!-- 同步 -->
+  <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
+    <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">同步</div>
+    <button id="cloud-sync-btn" class="settings-secondary-btn" type="button">手动同步</button>
+    <div id="session-sync-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
+  </div>
+
   <!-- 固定文件 -->
   <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
     <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">固定文件（每次对话自动带入）</div>
@@ -1066,7 +1072,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-09-03-remove-preferences';
+  const APP_VERSION = '2026-09-03-sync-settings-only';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -2165,6 +2171,7 @@ ${dialogText}
   const navMemory = document.getElementById('nav-memory');
   const cloudSyncBtn = document.getElementById('cloud-sync-btn');
   const sessionSyncStatus = document.getElementById('session-sync-status');
+  const syncErrorPill = document.getElementById('sync-error-pill');
   let lastSessionSyncState = {
     state: 'idle',
     local: 0,
@@ -2174,8 +2181,19 @@ ${dialogText}
   };
 
   function renderSessionSyncStatus() {
-    if (!sessionSyncStatus) return;
     const { state, local, cloud, pending, uploaded } = lastSessionSyncState;
+    if (syncErrorPill) {
+      if (state === 'error') {
+        syncErrorPill.style.display = 'block';
+        syncErrorPill.textContent = '同步失败';
+      } else if (pending > 0) {
+        syncErrorPill.style.display = 'block';
+        syncErrorPill.textContent = `待传 ${pending} 个`;
+      } else {
+        syncErrorPill.style.display = 'none';
+      }
+    }
+    if (!sessionSyncStatus) return;
     if (state === 'syncing') {
       sessionSyncStatus.textContent = '同步中…';
       sessionSyncStatus.style.color = '#888';
