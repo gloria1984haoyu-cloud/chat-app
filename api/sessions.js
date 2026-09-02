@@ -1,27 +1,21 @@
-export const config = { runtime: 'edge', regions: ['hkg1'], maxDuration: 60 };
+export const config = { regions: ['hkg1'], maxDuration: 30 };
 
 const SB_URL = process.env.SUPABASE_URL || 'https://xtyouprikflaumctggxs.supabase.co';
 const SB_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_7of0a388w-l2JV8rD3K8rg_3Jh3ZniY';
 
-function jsonResponse(payload, status = 200) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+function sendJson(res, status, data) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.end(JSON.stringify(data));
 }
 
-function corsResponse() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
+function sendCors(res) {
+  res.statusCode = 204;
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.end();
 }
 
 function sbHeaders(extra = {}) {
@@ -53,76 +47,66 @@ function safeSession(session) {
   };
 }
 
-async function readRequestJson(req) {
-  try {
-    return await req.json();
-  } catch {
-    return null;
-  }
-}
-
-async function proxyError(res) {
-  const text = await res.text().catch(() => '');
-  return jsonResponse({
+async function proxyError(upstream, res) {
+  const text = await upstream.text().catch(() => '');
+  sendJson(res, upstream.status || 502, {
     error: {
       message: '会话云同步失败',
-      upstream_status: res.status,
+      upstream_status: upstream.status,
       upstream_body: text.slice(0, 800),
     },
-  }, res.status || 502);
+  });
 }
 
-export default async function handler(req) {
-  if (req.method === 'OPTIONS') return corsResponse();
+export default async function handler(req, res) {
+  if (req.method === 'OPTIONS') return sendCors(res);
 
   if (req.method === 'GET') {
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/sessions?select=*&order=created_at.desc`, {
+      const upstream = await fetch(`${SB_URL}/rest/v1/sessions?select=*&order=created_at.desc`, {
         headers: sbHeaders(),
       });
-      if (!res.ok) return proxyError(res);
-      const data = await res.json();
-      return jsonResponse(Array.isArray(data) ? data : []);
+      if (!upstream.ok) return proxyError(upstream, res);
+      const data = await upstream.json();
+      return sendJson(res, 200, Array.isArray(data) ? data : []);
     } catch (e) {
-      return jsonResponse({ error: { message: e.message || '会话云同步失败' } }, 502);
+      return sendJson(res, 502, { error: { message: e.message || '会话云同步失败' } });
     }
   }
 
   if (req.method === 'POST') {
-    const body = await readRequestJson(req);
-    const incoming = Array.isArray(body) ? body : [body];
+    const incoming = Array.isArray(req.body) ? req.body : [req.body];
     const payload = incoming.map(safeSession).filter(session => session.id);
-    if (payload.length === 0) return jsonResponse({ error: { message: '缺少会话 ID' } }, 400);
+    if (payload.length === 0) return sendJson(res, 400, { error: { message: '缺少会话 ID' } });
 
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/sessions`, {
+      const upstream = await fetch(`${SB_URL}/rest/v1/sessions`, {
         method: 'POST',
         headers: sbHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
         body: JSON.stringify(payload),
       });
-      if (!res.ok) return proxyError(res);
-      return jsonResponse({ ok: true, count: payload.length });
+      if (!upstream.ok) return proxyError(upstream, res);
+      return sendJson(res, 200, { ok: true, count: payload.length });
     } catch (e) {
-      return jsonResponse({ error: { message: e.message || '会话云同步失败' } }, 502);
+      return sendJson(res, 502, { error: { message: e.message || '会话云同步失败' } });
     }
   }
 
   if (req.method === 'DELETE') {
-    const url = new URL(req.url);
-    const id = url.searchParams.get('id');
-    if (!id) return jsonResponse({ error: { message: '缺少会话 ID' } }, 400);
+    const id = req.query?.id;
+    if (!id) return sendJson(res, 400, { error: { message: '缺少会话 ID' } });
 
     try {
-      const res = await fetch(`${SB_URL}/rest/v1/sessions?id=eq.${encodeURIComponent(id)}`, {
+      const upstream = await fetch(`${SB_URL}/rest/v1/sessions?id=eq.${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: sbHeaders({ Prefer: 'return=minimal' }),
       });
-      if (!res.ok) return proxyError(res);
-      return jsonResponse({ ok: true });
+      if (!upstream.ok) return proxyError(upstream, res);
+      return sendJson(res, 200, { ok: true });
     } catch (e) {
-      return jsonResponse({ error: { message: e.message || '会话云同步失败' } }, 502);
+      return sendJson(res, 502, { error: { message: e.message || '会话云同步失败' } });
     }
   }
 
-  return jsonResponse({ error: { message: 'Method not allowed' } }, 405);
+  return sendJson(res, 405, { error: { message: 'Method not allowed' } });
 }
