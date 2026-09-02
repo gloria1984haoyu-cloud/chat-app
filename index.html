@@ -1105,7 +1105,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-09-03-session-proxy-sync-node';
+  const APP_VERSION = '2026-09-03-sync-timeout-guard';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1244,7 +1244,10 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
         const rows = await proxyRes.json();
         if (Array.isArray(rows)) return rows;
       }
-    } catch {}
+      if (proxyRes.status !== 404) return null;
+    } catch {
+      if (location.protocol !== 'file:') return null;
+    }
     try {
       const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/sessions?select=*&order=created_at.desc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
@@ -1263,15 +1266,18 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
       };
       const payload = JSON.stringify(safeSession);
       try {
-        const proxyRes = await fetch('/api/sessions', {
+        const proxyRes = await _fetchWithTimeout('/api/sessions', SB_FETCH_TIMEOUT_MS, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,
           keepalive: payload.length < 60000,
         });
         if (proxyRes.ok) return true;
-      } catch {}
-      const res = await fetch(`${SB_URL}/rest/v1/sessions`, {
+        if (proxyRes.status !== 404) return false;
+      } catch {
+        if (location.protocol !== 'file:') return false;
+      }
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/sessions`, SB_FETCH_TIMEOUT_MS, {
         method: 'POST',
         headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates' },
         body: payload,
@@ -1284,11 +1290,14 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   }
   async function sbDeleteSession(id) {
     try {
-      const proxyRes = await fetch(`/api/sessions?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const proxyRes = await _fetchWithTimeout(`/api/sessions?id=${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS, { method: 'DELETE' });
       if (proxyRes.ok) return;
-    } catch {}
+      if (proxyRes.status !== 404) return;
+    } catch {
+      if (location.protocol !== 'file:') return;
+    }
     try {
-      await fetch(`${SB_URL}/rest/v1/sessions?id=eq.${encodeURIComponent(id)}`, {
+      await _fetchWithTimeout(`${SB_URL}/rest/v1/sessions?id=eq.${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS, {
         method: 'DELETE', headers: sbHeaders(),
       });
     } catch {}
