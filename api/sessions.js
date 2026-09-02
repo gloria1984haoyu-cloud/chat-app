@@ -1,4 +1,4 @@
-export const config = { regions: ['hkg1'], maxDuration: 30 };
+export const config = { regions: ['iad1'], maxDuration: 30 };
 
 const SB_URL = process.env.SUPABASE_URL || 'https://xtyouprikflaumctggxs.supabase.co';
 const SB_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_7of0a388w-l2JV8rD3K8rg_3Jh3ZniY';
