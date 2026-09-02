@@ -1087,9 +1087,13 @@
 
   <!-- 导入历史 -->
   <div style="border-top:1px solid #222;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
-    <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">导入历史对话</div>
+    <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.05em;">历史对话备份</div>
+    <div class="settings-action-row">
+      <button id="export-current-session" class="settings-secondary-btn">导出当前对话</button>
+      <button id="export-all-sessions" class="settings-secondary-btn">导出全部对话</button>
+    </div>
     <label id="import-label" style="background:#1a1a1a;border:1px dashed #333;border-radius:8px;padding:10px;text-align:center;font-size:13px;color:#888;cursor:pointer;">
-      选择 session_data.json
+      导入 session_data.json
       <input id="import-file" type="file" accept=".json" style="display:none" />
     </label>
     <div id="import-status" style="font-size:12px;color:#666;text-align:center;min-height:16px;"></div>
@@ -1105,7 +1109,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-09-03-sync-timeout-guard';
+  const APP_VERSION = '2026-09-03-session-export-recovery';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -3945,6 +3949,54 @@ ${assistantText}`;
     e.target.value = '';
   });
 
+  function downloadJsonFile(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function sessionExportName(prefix, session) {
+    const title = String(session?.title || 'session').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 36);
+    return `${prefix}-${title}-${Date.now()}.json`;
+  }
+
+  document.getElementById('export-current-session').addEventListener('click', () => {
+    const status = document.getElementById('import-status');
+    const session = getSession(currentSessionId);
+    if (!session) {
+      status.style.color = '#ff6b6b';
+      status.textContent = '没有可导出的当前对话';
+      return;
+    }
+    downloadJsonFile(session, sessionExportName('lucian-session', session));
+    status.style.color = '#4caf50';
+    status.textContent = `✓ 已导出：${session.title || '当前对话'}`;
+  });
+
+  document.getElementById('export-all-sessions').addEventListener('click', () => {
+    const status = document.getElementById('import-status');
+    const sessions = getSessions();
+    if (sessions.length === 0) {
+      status.style.color = '#ff6b6b';
+      status.textContent = '没有可导出的对话';
+      return;
+    }
+    downloadJsonFile({ sessions, exported_at: Date.now() }, `lucian-all-sessions-${Date.now()}.json`);
+    status.style.color = '#4caf50';
+    status.textContent = `✓ 已导出全部 ${sessions.length} 个对话`;
+  });
+
+  function normalizeImportedSessions(data) {
+    const items = Array.isArray(data) ? data : Array.isArray(data?.sessions) ? data.sessions : [data];
+    return items.filter(session => session?.id && Array.isArray(session.messages));
+  }
+
   // ── Import session from JSON file ──
   document.getElementById('import-file').addEventListener('change', function(e) {
     const file = e.target.files[0];
@@ -3955,22 +4007,27 @@ ${assistantText}`;
     const reader = new FileReader();
     reader.onload = function(ev) {
       try {
-        const session = JSON.parse(ev.target.result);
-        if (!session.id || !Array.isArray(session.messages)) {
+        const imported = normalizeImportedSessions(JSON.parse(ev.target.result));
+        if (imported.length === 0) {
           status.style.color = '#ff6b6b';
           status.textContent = '文件格式不对';
           return;
         }
         const sessions = getSessions();
-        const idx = sessions.findIndex(s => s.id === session.id);
-        if (idx >= 0) sessions.splice(idx, 1);
-        sessions.unshift(session);
+        [...imported].reverse().forEach(session => {
+          const idx = sessions.findIndex(s => s.id === session.id);
+          if (idx >= 0) sessions.splice(idx, 1);
+          sessions.unshift(session);
+        });
         saveSessions(sessions);
-        sbUpsertSession(session);
+        imported.forEach(session => sbUpsertSession(session));
         renderSessionList();
+        const first = imported[0];
         status.style.color = '#4caf50';
-        status.textContent = `✓ 导入成功，共 ${session.messages.length} 条消息`;
-        setTimeout(() => { loadSession(session.id); }, 500);
+        status.textContent = imported.length === 1
+          ? `✓ 导入成功，共 ${first.messages.length} 条消息`
+          : `✓ 导入成功，共 ${imported.length} 个对话`;
+        setTimeout(() => { loadSession(first.id); }, 500);
       } catch(err) {
         status.style.color = '#ff6b6b';
         status.textContent = '解析失败：' + err.message;
