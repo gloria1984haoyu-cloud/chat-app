@@ -844,48 +844,6 @@
     }
     .mem-del:hover { color: #ff6b6b; }
 
-    /* ── Preferences Library ── */
-    .pref-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      background: #1a1a1a;
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-size: 12px;
-      color: #ccc;
-    }
-    .pref-badge {
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 3px;
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
-    .pref-badge.hobby { background: #1a2a3a; color: #6af; }
-    .pref-badge.opinion { background: #2a1a3a; color: #a6f; }
-    .pref-badge.habit { background: #1a3a2a; color: #6fa; }
-    .pref-badge.feeling { background: #3a2a1a; color: #fa6; }
-    .pref-content { flex: 1; line-height: 1.5; }
-    .pref-del {
-      background: none; border: none; color: #444;
-      cursor: pointer; font-size: 13px; padding: 0 2px;
-      flex-shrink: 0; line-height: 1;
-    }
-    .pref-del:hover { color: #ff6b6b; }
-    #pref-extract-btn {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      color: #aaa;
-      border-radius: 8px;
-      padding: 8px;
-      font-size: 13px;
-      cursor: pointer;
-      text-align: center;
-    }
-    #pref-extract-btn:hover { background: #222; color: #e8e8e8; }
-    #pref-extract-btn:disabled { color: #555; cursor: not-allowed; }
-
     #memory-extract-btn {
       background: #1a1a1a;
       border: 1px solid #333;
@@ -991,7 +949,6 @@
   <div class="sidebar-section">
     <div class="sidebar-label">资料库</div>
     <button id="nav-memory" class="library-nav-item">记忆库</button>
-    <button id="nav-preferences" class="library-nav-item">偏好库</button>
   </div>
   <div class="sidebar-section">
     <button id="nav-chat" class="library-nav-item">对话</button>
@@ -1109,7 +1066,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-6';
-  const APP_VERSION = '2026-09-03-session-export-recovery';
+  const APP_VERSION = '2026-09-03-remove-preferences';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-6',
@@ -1441,31 +1398,6 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
     } catch {}
   }
 
-  // ── Supabase preferences ──
-  async function sbFetchPreferences() {
-    try {
-      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/preferences?select=*&order=created_at.asc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
-      if (!res.ok) return null;
-      return await res.json();
-    } catch { return null; }
-  }
-  async function sbUpsertPreference(pref) {
-    try {
-      await fetch(`${SB_URL}/rest/v1/preferences`, {
-        method: 'POST',
-        headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates' },
-        body: JSON.stringify(pref),
-      });
-    } catch {}
-  }
-  async function sbDeletePreference(id) {
-    try {
-      await fetch(`${SB_URL}/rest/v1/preferences?id=eq.${encodeURIComponent(id)}`, {
-        method: 'DELETE', headers: sbHeaders(),
-      });
-    } catch {}
-  }
-
   // ── 天气/位置/时间 ──
   let _cachedEnvContext = null;
   let _envContextExpiry = 0;
@@ -1538,7 +1470,6 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
 
   let pinnedFiles = []; // [{id, name, content}]
   let memories = []; // [{id, content, importance, created_at, last_mentioned}]
-  let preferences = []; // [{id, content, category, created_at, updated_at}]
 
   function readCachedList(key) {
     try {
@@ -1553,173 +1484,9 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
     localStorage.setItem(key, JSON.stringify(Array.isArray(value) ? value : []));
   }
 
-  // ── Preferences library ──
-  async function loadPreferences() {
-    const raw = await sbFetchPreferences();
-    if (raw === null) {
-      // Supabase 表不存在，降级到 localStorage
-      preferences = JSON.parse(localStorage.getItem('lc-preferences') || '[]');
-    } else {
-      preferences = raw;
-    }
-    if (preferences.length === 0) await initDefaultPreferences();
-    renderPreferenceList();
-  }
-
-  async function initDefaultPreferences() {
-    const defaults = [
-      { content: '对宇宙和物理学感兴趣', category: 'hobby' },
-      { content: '喜欢深夜安静的氛围', category: 'feeling' },
-      { content: '喜欢听 Gloria 聊她的一天', category: 'habit' },
-    ];
-    for (const d of defaults) {
-      const pref = {
-        id: Date.now().toString() + Math.random().toString(36).slice(2),
-        content: d.content,
-        category: d.category,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      preferences.push(pref);
-      await sbUpsertPreference(pref);
-    }
-    localStorage.setItem('lc-preferences', JSON.stringify(preferences));
-  }
-
-  function renderPreferenceList() {
-    const list = document.getElementById('pref-list');
-    if (!list) return;
-    list.innerHTML = '';
-    if (preferences.length === 0) {
-      list.innerHTML = '<div style="font-size:12px;color:#555;text-align:center;padding:8px 0;">暂无偏好</div>';
-      return;
-    }
-    const categoryLabel = { hobby:'爱好', opinion:'看法', habit:'习惯', feeling:'感受' };
-    preferences.forEach(p => {
-      const item = document.createElement('div');
-      item.className = 'pref-item';
-      const badge = document.createElement('span');
-      badge.className = 'pref-badge ' + (p.category || 'hobby');
-      badge.textContent = categoryLabel[p.category] || p.category || '爱好';
-      const content = document.createElement('span');
-      content.className = 'pref-content';
-      content.textContent = p.content;
-      const del = document.createElement('button');
-      del.className = 'pref-del';
-      del.textContent = '×';
-      del.addEventListener('click', async () => {
-        preferences = preferences.filter(x => x.id !== p.id);
-        localStorage.setItem('lc-preferences', JSON.stringify(preferences));
-        await sbDeletePreference(p.id);
-        renderPreferenceList();
-      });
-      item.appendChild(badge);
-      item.appendChild(content);
-      item.appendChild(del);
-      list.appendChild(item);
-    });
-  }
-
-  async function extractPreferences(allMessages) {
-    const btn = document.getElementById('pref-extract-btn');
-    const status = document.getElementById('pref-status');
-    if (btn) btn.disabled = true;
-    if (status) { status.style.color = '#888'; status.textContent = '正在分析偏好…'; }
-
-    const cfg = getConfig();
-    const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
-    const key = (cfg.key || oldCfg.key || document.getElementById('cfg-key').value || '').trim();
-    const base = (cfg.base || oldCfg.base || document.getElementById('cfg-base').value || 'https://ai.aiclick.cc').trim();
-
-    if (!key) {
-      if (status) { status.style.color = '#ff6b6b'; status.textContent = '需要 API Key'; }
-      if (btn) btn.disabled = false;
-      return;
-    }
-
-    const recent = allMessages.slice(-240);
-    const dialogText = recent
-      .filter(m => m.role === 'assistant')
-      .map(m => typeof m.content === 'string' ? m.content : '')
-      .filter(Boolean)
-      .join('\n')
-      .slice(-6000);
-
-    if (!dialogText.trim()) {
-      if (status) { status.style.color = '#666'; status.textContent = '暂无 AI 回复可分析'; }
-      if (btn) btn.disabled = false;
-      return;
-    }
-
-    const extractPrompt = `请从以下 AI 的回复中提取 AI 表达过的兴趣、爱好、看法和感受（即 AI 说"我"时表达的偏好）。
-
-规则：
-- 每条偏好一行，格式：[类别] 偏好内容
-- 类别分四种：hobby（爱好/兴趣）、opinion（看法/观点）、habit（习惯倾向）、feeling（情感偏好）
-- 只提取明确表达的偏好，最多8条
-- 如果没有，返回：无
-
-AI 回复内容：
-${dialogText}
-
-请直接输出列表，格式：[hobby] 内容 或 [opinion] 内容 等`;
-
-    try {
-      const { res, data } = await fetchChatJson({
-        key,
-        base,
-        body: {
-          model: EXTRACTION_MODEL,
-          max_tokens: 512,
-          messages: [{ role: 'user', content: extractPrompt }],
-        },
-      });
-      if (!res.ok || data.error) throw new Error(data.error?.message || 'API error');
-
-      const text = data.content?.[0]?.text || '';
-      if (text.trim() === '无' || !text.trim()) {
-        if (status) { status.style.color = '#666'; status.textContent = '暂无新偏好'; }
-        if (btn) btn.disabled = false;
-        return;
-      }
-
-      const validCats = ['hobby','opinion','habit','feeling'];
-      const lines = text.split('\n').filter(l => validCats.some(c => l.includes(`[${c}]`)));
-      let added = 0;
-      for (const line of lines) {
-        const catMatch = line.match(/\[(hobby|opinion|habit|feeling)\]/);
-        if (!catMatch) continue;
-        const category = catMatch[1];
-        const content = line.replace(/\[.*?\]/g, '').trim();
-        if (!content) continue;
-        if (preferences.some(p => p.content === content)) continue;
-        const pref = {
-          id: Date.now().toString() + Math.random().toString(36).slice(2),
-          content,
-          category,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        preferences.push(pref);
-        await sbUpsertPreference(pref);
-        added++;
-      }
-      localStorage.setItem('lc-preferences', JSON.stringify(preferences));
-      if (status) { status.style.color = '#4caf50'; status.textContent = added > 0 ? `✓ 新增 ${added} 条偏好` : '✓ 偏好已是最新'; }
-      renderPreferenceList();
-    } catch(e) {
-      if (status) { status.style.color = '#ff6b6b'; status.textContent = '提取失败：' + e.message; }
-    }
-    if (btn) btn.disabled = false;
-  }
-
-  async function maybeExtractPreferences() {
-    const last = parseInt(localStorage.getItem('last_pref_extract') || '0');
-    if (Date.now() - last < 24 * 60 * 60 * 1000) return;
-    const allMessages = collectAllMessagesChronological();
-    if (allMessages.filter(m => m.role === 'assistant').length < 3) return;
-    localStorage.setItem('last_pref_extract', Date.now().toString());
-    await extractPreferences(allMessages);
+  function cleanupDeprecatedPreferences() {
+    localStorage.removeItem('lc-preferences');
+    localStorage.removeItem('last_pref_extract');
   }
 
   async function loadFiles() {
@@ -2396,7 +2163,6 @@ ${dialogText}
   const emptyState = document.getElementById('empty-state');
   const navChat = document.getElementById('nav-chat');
   const navMemory = document.getElementById('nav-memory');
-  const navPreferences = document.getElementById('nav-preferences');
   const cloudSyncBtn = document.getElementById('cloud-sync-btn');
   const sessionSyncStatus = document.getElementById('session-sync-status');
   let lastSessionSyncState = {
@@ -2434,6 +2200,7 @@ ${dialogText}
 
   // ── Init ──
   async function init() {
+    cleanupDeprecatedPreferences();
     const cfg = getConfig();
     const oldCfg = JSON.parse(localStorage.getItem('chat-config') || '{}');
     const merged = Object.assign({}, oldCfg, cfg);
@@ -2451,14 +2218,13 @@ ${dialogText}
     renderSessionSyncStatus();
     if (localSessions.length > 0) loadSession(localSessions[0].id);
 
-    // 会话同步优先启动，不能被固定文件、记忆库或偏好库的网络请求拖住。
+    // 会话同步优先启动，不能被固定文件或记忆库的网络请求拖住。
     syncSessionsFromCloud({ writeBack: true }).catch(() => {});
 
     // 配置和资料库放到后台加载，先保证手机/电脑新聊天能互相看见。
     syncConfigFromCloud().catch(() => {});
     loadFiles().catch(() => {});
     loadMemories().then(() => maybeExtractMemories()).catch(() => {});
-    loadPreferences().catch(() => {});
 
     // 预热环境信息（并行，不阻塞）
     getEnvContext();
@@ -2557,9 +2323,9 @@ ${dialogText}
   function getMemoryModeMeta(mode) {
     const normalized = normalizeMemoryMode(mode);
     const map = {
-      normal: { label: '记忆', title: '普通模式：正常使用记忆库和偏好库', next: 'immersive' },
+      normal: { label: '记忆', title: '普通模式：正常使用记忆库', next: 'immersive' },
       immersive: { label: '沉浸', title: '沉浸模式：不主动把现实记忆带进剧情', next: 'off' },
-      off: { label: '无记忆', title: '关闭记忆：本窗口不带全局记忆库和偏好库', next: 'normal' },
+      off: { label: '无记忆', title: '关闭记忆：本窗口不带全局记忆库', next: 'normal' },
     };
     return map[normalized];
   }
@@ -2589,7 +2355,6 @@ ${dialogText}
   function renderLibraryNav() {
     navChat.classList.toggle('active', currentView === 'chat');
     navMemory.classList.toggle('active', currentView === 'memory');
-    navPreferences.classList.toggle('active', currentView === 'preferences');
   }
 
   function showChatPage() {
@@ -2728,34 +2493,6 @@ ${summary}`;
     });
     renderMemoryList();
     updateNextExtractDisplay();
-    renderLibraryNav();
-    renderSessionList();
-    closeMobileSidebar();
-  }
-
-  function showPreferencesPage() {
-    currentView = 'preferences';
-    chatArea.innerHTML = `
-      <div class="library-page">
-        <div class="library-page-header">
-          <div>
-            <div class="library-page-title">偏好库</div>
-            <div class="library-page-subtitle">记录 Lucian 在对话里表达过的习惯、看法和感受，让回复更稳定。</div>
-          </div>
-          <div class="library-page-actions">
-            <button id="pref-extract-btn">立即更新偏好</button>
-          </div>
-        </div>
-        <div id="pref-status" style="font-size:12px;color:#666;min-height:16px;"></div>
-        <div id="pref-list" class="library-list"></div>
-      </div>
-    `;
-    document.getElementById('pref-extract-btn').addEventListener('click', async () => {
-      const allMessages = collectAllMessagesChronological();
-      localStorage.setItem('last_pref_extract', Date.now().toString());
-      await extractPreferences(allMessages);
-    });
-    renderPreferenceList();
     renderLibraryNav();
     renderSessionList();
     closeMobileSidebar();
@@ -3501,14 +3238,6 @@ ${assistantText}`;
       const memBlock = memIntro + memText;
       system = system ? system + '\n\n' + memBlock : memBlock;
     }
-    if (memoryMode !== 'off' && preferences.length > 0) {
-      const prefText = preferences.map(p => `- ${p.content}`).join('\n');
-      const prefIntro = memoryMode === 'immersive'
-        ? '【我的偏好】以下是黎川的长期偏好。当前窗口处于沉浸模式，只能作为隐藏背景，不要为了使用偏好而打断剧情和沉浸感：\n'
-        : '【我的偏好】以下是我的兴趣爱好和想法：\n';
-      const prefBlock = prefIntro + prefText;
-      system = system ? system + '\n\n' + prefBlock : prefBlock;
-    }
     // 注入环境信息到最前面（并行请求，失败静默）
     const envCtx = await getEnvContext();
     system = envCtx + '\n\n' + (system || '');
@@ -3570,8 +3299,6 @@ ${assistantText}`;
         msgs.push({ role: 'assistant', content: reply, thinking, timestamp: assistantTs });
         updateSession(currentSessionId, { messages: msgs });
         maybeSummarizeSessionInBackground(currentSessionId);
-        // 对话结束后异步提取偏好
-        maybeExtractPreferences();
       }
     } catch (e) {
       typingRow.remove();
@@ -3825,7 +3552,6 @@ ${assistantText}`;
   });
   navChat.addEventListener('click', showChatPage);
   navMemory.addEventListener('click', showMemoryPage);
-  navPreferences.addEventListener('click', showPreferencesPage);
   cloudSyncBtn?.addEventListener('click', syncNow);
 
   const sidebarOverlay = document.getElementById('sidebar-overlay');
