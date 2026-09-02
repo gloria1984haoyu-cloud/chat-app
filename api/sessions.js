@@ -27,23 +27,12 @@ function sbHeaders(extra = {}) {
   };
 }
 
-function normalizeMemoryMode(mode) {
-  return ['normal', 'immersive', 'off'].includes(mode) ? mode : 'normal';
-}
-
 function safeSession(session) {
   return {
     id: session?.id,
     title: session?.title || '新对话',
     messages: Array.isArray(session?.messages) ? session.messages : [],
     created_at: Number(session?.created_at || session?.id || Date.now()),
-    unread: Number(session?.unread || 0),
-    last_read_at: Number(session?.last_read_at || 0),
-    last_message_at: Number(session?.last_message_at || 0),
-    summary: session?.summary || '',
-    summary_message_count: Number(session?.summary_message_count || 0),
-    memory_mode: normalizeMemoryMode(session?.memory_mode),
-    memory_mode_updated_at: Number(session?.memory_mode_updated_at || 0),
   };
 }
 
