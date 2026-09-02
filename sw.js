@@ -1,4 +1,4 @@
-const CACHE = 'lucian-v21-resilient-cache';
+const CACHE = 'lucian-v22-network-first-doc';
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -21,19 +21,25 @@ self.addEventListener('fetch', e => {
   // 不缓存 API 请求
   if (e.request.method !== 'GET' || url.includes('/api/')) return;
 
-  // 手机 PWA 先显示缓存入口，再后台更新，避免每次打开都等网络白屏。
+  // HTML 必须优先走网络，否则手机 PWA 会长期卡在旧前端。
   if (e.request.mode === 'navigate' || e.request.destination === 'document') {
     e.respondWith(
-      caches.match(e.request).then(cached => {
-        const fresh = fetch(e.request).then(res => {
+      fetch(e.request).then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() =>
+        caches.match(e.request).then(cached =>
+          cached || caches.match('/index.html').then(index => index || fetch('/index.html').then(res => {
           if (res.ok) {
             const clone = res.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clone));
+            caches.open(CACHE).then(c => c.put('/index.html', clone));
           }
           return res;
-        }).catch(() => cached || caches.match('/index.html'));
-        return cached || fresh;
-      })
+        }))
+      ))
     );
     return;
   }
