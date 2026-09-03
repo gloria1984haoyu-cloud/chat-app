@@ -56,12 +56,12 @@ export default async function handler(req, res) {
     }
 
     const upstreamBody = { ...body };
-    delete upstreamBody.stream;
 
     const upstream = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${String(apiKey)}`,
         'x-api-key': String(apiKey),
         'anthropic-version': String(req.headers['anthropic-version'] || '2023-06-01'),
       },
@@ -70,6 +70,23 @@ export default async function handler(req, res) {
     });
 
     const contentType = upstream.headers.get('Content-Type') || '';
+
+    if (upstreamBody.stream && upstream.body && contentType.includes('text/event-stream')) {
+      res.statusCode = upstream.status;
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      const reader = upstream.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+      return res.end();
+    }
+
     const text = await upstream.text();
     const trimmed = text.trim();
     const isJson = contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[');
