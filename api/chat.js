@@ -1,4 +1,4 @@
-export const config = { regions: ['hkg1'], maxDuration: 60 };
+export const config = { regions: ['iad1'], maxDuration: 60 };
 
 function sendJson(res, status, payload) {
   res.statusCode = status;
