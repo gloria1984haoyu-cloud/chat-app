@@ -13,6 +13,11 @@ const FALLBACK_PUBLIC_KEY = 'BMe3CEiLb3zQR7cKQipgVZIMLIHNC0UIHs5eASiUwxd097_Fpnm
 
 const IMPORTANT_KEYWORDS = ['简历', '面试', '申诉', 'Claude', 'cluade', '前端', '项目', 'API', '工作', '作品集', '投递', 'offer'];
 const EMOTION_KEYWORDS = ['心情不好', '难过', '哭', '焦虑', '烦', '胸闷', '睡不着', '没吃饭', '难受', '崩溃', '绝望', '孤独'];
+const MODEL_ALIASES = {
+  'claude-sonnet-4-6': 'claude-sonnet-4-5-20250929',
+  'claude-sonnet-4-5': 'claude-sonnet-4-5-20250929',
+  'claude-opus-4-5': 'claude-opus-4-5-20251101',
+};
 
 function sendJson(res, status, data) {
   res.statusCode = status;
@@ -238,11 +243,13 @@ async function callModel({ prompt, cloudConfig }) {
   const apiKey = process.env.PROACTIVE_API_KEY;
   if (!apiKey) throw new Error('Missing PROACTIVE_API_KEY');
   const base = process.env.PROACTIVE_BASE_URL || cloudConfig.base || 'https://ai.aiclick.cc';
-  const model = process.env.PROACTIVE_MODEL || cloudConfig.model || 'claude-sonnet-4-6';
+  const rawModel = process.env.PROACTIVE_MODEL || cloudConfig.model || 'claude-sonnet-4-5-20250929';
+  const model = MODEL_ALIASES[rawModel] || rawModel;
   const response = await fetch(`${base}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
