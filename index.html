@@ -1072,7 +1072,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
-  const APP_VERSION = '2026-09-04-sonnet45-default';
+  const APP_VERSION = '2026-09-19-proxied-cloud-loads';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-5-20250929',
@@ -1263,6 +1263,16 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   // ── Supabase files ──
   async function sbFetchFiles() {
     try {
+      const proxyRes = await _fetchWithTimeout('/api/files', SB_FETCH_TIMEOUT_MS);
+      if (proxyRes.ok) {
+        const rows = await proxyRes.json();
+        if (Array.isArray(rows)) return rows;
+      }
+      if (proxyRes.status !== 404) return null;
+    } catch {
+      if (location.protocol !== 'file:') return null;
+    }
+    try {
       const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?select=*&order=created_at.asc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       return await res.json();
@@ -1270,7 +1280,18 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   }
   async function sbUpsertFile(file) {
     try {
-      await fetch(`${SB_URL}/rest/v1/files`, {
+      const proxyRes = await _fetchWithTimeout('/api/files', SB_FETCH_TIMEOUT_MS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(file),
+      });
+      if (proxyRes.ok) return;
+      if (proxyRes.status !== 404) return;
+    } catch {
+      if (location.protocol !== 'file:') return;
+    }
+    try {
+      await _fetchWithTimeout(`${SB_URL}/rest/v1/files`, SB_FETCH_TIMEOUT_MS, {
         method: 'POST',
         headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify(file),
@@ -1279,7 +1300,14 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   }
   async function sbDeleteFile(id) {
     try {
-      await fetch(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}`, {
+      const proxyRes = await _fetchWithTimeout(`/api/files?id=${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS, { method: 'DELETE' });
+      if (proxyRes.ok) return;
+      if (proxyRes.status !== 404) return;
+    } catch {
+      if (location.protocol !== 'file:') return;
+    }
+    try {
+      await _fetchWithTimeout(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS, {
         method: 'DELETE', headers: sbHeaders(),
       });
     } catch {}
@@ -1307,9 +1335,14 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   async function sbFetchSessionSummary(sessionId) {
     try {
       const id = sessionSummaryFileId(sessionId);
-      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}&select=*`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
-      if (!res.ok) return null;
-      const rows = await res.json();
+      let rows = null;
+      const proxyRes = await _fetchWithTimeout(`/api/files?id=${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS);
+      if (proxyRes.ok) rows = await proxyRes.json();
+      if (!Array.isArray(rows) && proxyRes.status === 404) {
+        const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(id)}&select=*`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
+        if (!res.ok) return null;
+        rows = await res.json();
+      }
       return parseSessionSummaryFile(rows?.[0]);
     } catch {
       return null;
@@ -1343,9 +1376,14 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
 
   async function sbFetchCloudConfig() {
     try {
-      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(CLOUD_CONFIG_FILE_ID)}&select=*`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
-      if (!res.ok) return null;
-      const rows = await res.json();
+      let rows = null;
+      const proxyRes = await _fetchWithTimeout(`/api/files?id=${encodeURIComponent(CLOUD_CONFIG_FILE_ID)}`, SB_FETCH_TIMEOUT_MS);
+      if (proxyRes.ok) rows = await proxyRes.json();
+      if (!Array.isArray(rows) && proxyRes.status === 404) {
+        const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/files?id=eq.${encodeURIComponent(CLOUD_CONFIG_FILE_ID)}&select=*`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
+        if (!res.ok) return null;
+        rows = await res.json();
+      }
       if (!rows?.[0]?.content) return null;
       return JSON.parse(rows[0].content);
     } catch { return null; }
@@ -1372,6 +1410,16 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   // ── Supabase memory ──
   async function sbFetchMemory() {
     try {
+      const proxyRes = await _fetchWithTimeout('/api/memory', SB_FETCH_TIMEOUT_MS);
+      if (proxyRes.ok) {
+        const rows = await proxyRes.json();
+        if (Array.isArray(rows)) return rows;
+      }
+      if (proxyRes.status !== 404) return null;
+    } catch {
+      if (location.protocol !== 'file:') return null;
+    }
+    try {
       const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/memory?select=*&order=created_at.desc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
       return await res.json();
@@ -1379,7 +1427,18 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   }
   async function sbUpsertMemory(item) {
     try {
-      await fetch(`${SB_URL}/rest/v1/memory`, {
+      const proxyRes = await _fetchWithTimeout('/api/memory', SB_FETCH_TIMEOUT_MS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      });
+      if (proxyRes.ok) return;
+      if (proxyRes.status !== 404) return;
+    } catch {
+      if (location.protocol !== 'file:') return;
+    }
+    try {
+      await _fetchWithTimeout(`${SB_URL}/rest/v1/memory`, SB_FETCH_TIMEOUT_MS, {
         method: 'POST',
         headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates' },
         body: JSON.stringify(item),
@@ -1388,7 +1447,14 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
   }
   async function sbDeleteMemory(id) {
     try {
-      await fetch(`${SB_URL}/rest/v1/memory?id=eq.${encodeURIComponent(id)}`, {
+      const proxyRes = await _fetchWithTimeout(`/api/memory?id=${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS, { method: 'DELETE' });
+      if (proxyRes.ok) return;
+      if (proxyRes.status !== 404) return;
+    } catch {
+      if (location.protocol !== 'file:') return;
+    }
+    try {
+      await _fetchWithTimeout(`${SB_URL}/rest/v1/memory?id=eq.${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS, {
         method: 'DELETE', headers: sbHeaders(),
       });
     } catch {}
