@@ -1072,7 +1072,7 @@
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
   const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
-  const APP_VERSION = '2026-09-19-proxied-cloud-loads';
+  const APP_VERSION = '2026-09-20-mobile-light-sync';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-5-20250929',
@@ -1194,9 +1194,23 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
       'Authorization': `Bearer ${SB_KEY}`,
     };
   }
-  async function sbFetchSessions() {
+  function compactCloudSession(session) {
+    const messages = Array.isArray(session?.messages) ? session.messages : [];
+    const last = messages[messages.length - 1] || {};
+    return {
+      id: session?.id,
+      title: session?.title || '新对话',
+      created_at: Number(session?.created_at || session?.id || Date.now()),
+      _cloud_meta_only: true,
+      _needs_cloud_load: messages.length > 0,
+      _cloud_message_count: messages.length,
+      _cloud_last_timestamp: Number(last.timestamp || session?.created_at || session?.id || 0),
+    };
+  }
+
+  async function sbFetchSessions({ compact = true } = {}) {
     try {
-      const proxyRes = await _fetchWithTimeout('/api/sessions', SB_FETCH_TIMEOUT_MS);
+      const proxyRes = await _fetchWithTimeout(`/api/sessions${compact ? '?compact=1' : ''}`, SB_FETCH_TIMEOUT_MS);
       if (proxyRes.ok) {
         const rows = await proxyRes.json();
         if (Array.isArray(rows)) return rows;
@@ -1208,7 +1222,27 @@ eg：不是“我会害羞”，而是“我好害羞”，是身体自然的流
     try {
       const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/sessions?select=*&order=created_at.desc`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
       if (!res.ok) return null;
-      return await res.json();
+      const rows = await res.json();
+      return compact ? rows.map(compactCloudSession) : rows;
+    } catch { return null; }
+  }
+  async function sbFetchSessionById(id) {
+    if (!id) return null;
+    try {
+      const proxyRes = await _fetchWithTimeout(`/api/sessions?id=${encodeURIComponent(id)}`, SB_FETCH_TIMEOUT_MS);
+      if (proxyRes.ok) {
+        const row = await proxyRes.json();
+        if (row?.id) return row;
+      }
+      if (proxyRes.status !== 404) return null;
+    } catch {
+      if (location.protocol !== 'file:') return null;
+    }
+    try {
+      const res = await _fetchWithTimeout(`${SB_URL}/rest/v1/sessions?id=eq.${encodeURIComponent(id)}&select=*`, SB_FETCH_TIMEOUT_MS, { headers: sbHeaders() });
+      if (!res.ok) return null;
+      const rows = await res.json();
+      return rows?.[0] || null;
     } catch { return null; }
   }
   async function sbUpsertSession(session) {
@@ -1891,7 +1925,18 @@ ${dialogText}
   function sessionSortValue(session) {
     const messages = Array.isArray(session.messages) ? session.messages : [];
     const last = messages[messages.length - 1];
-    return Number(last?.timestamp || session._updated_at || session.created_at || session.id || 0);
+    const localLast = Number(last?.timestamp || 0);
+    const cloudLast = Number(session._cloud_last_timestamp || 0);
+    return Number(Math.max(localLast, cloudLast) || session._updated_at || session.created_at || session.id || 0);
+  }
+  function isCloudMetaOnly(session) {
+    return session?._cloud_meta_only === true;
+  }
+  function sessionNeedsCloudHydration(session) {
+    if (!session) return false;
+    const messages = Array.isArray(session.messages) ? session.messages : [];
+    const cloudCount = Number(session._cloud_message_count || 0);
+    return !!session._needs_cloud_load || cloudCount > messages.length;
   }
   function isNewerSession(a, b) {
     const aMessages = Array.isArray(a.messages) ? a.messages : [];
@@ -1957,7 +2002,26 @@ ${dialogText}
       memory_mode: normalizeMemoryMode(session.memory_mode),
     };
   }
+  function mergeCloudMetaState(base, meta) {
+    const existingMessages = Array.isArray(base?.messages) ? base.messages : [];
+    const cloudCount = Number(meta?._cloud_message_count || 0);
+    const cloudLast = Number(meta?._cloud_last_timestamp || 0);
+    const createdAt = Number(meta?.created_at || base?.created_at || meta?.id || Date.now());
+    return mergeSessionMemoryMode(mergeSessionSummaryState(mergeUnreadState({
+      ...(base || {}),
+      id: meta.id,
+      title: meta.title || base?.title || '新对话',
+      created_at: createdAt,
+      messages: existingMessages,
+      _cloud_meta_only: false,
+      _needs_cloud_load: cloudCount > existingMessages.length || (!!(meta?._needs_cloud_load) && existingMessages.length === 0),
+      _cloud_message_count: Math.max(cloudCount, existingMessages.length),
+      _cloud_last_timestamp: Math.max(cloudLast, Number(base?._cloud_last_timestamp || 0)),
+    }, meta), meta), meta);
+  }
   function mergeSessionState(base, incoming) {
+    if (isCloudMetaOnly(incoming)) return mergeCloudMetaState(base, incoming);
+    if (isCloudMetaOnly(base)) return mergeCloudMetaState(incoming, base);
     if (!base) return incoming;
     if (isNewerSession(incoming, base)) return mergeSessionMemoryMode(mergeSessionSummaryState(mergeUnreadState(incoming, base), base), base);
     return mergeSessionMemoryMode(mergeSessionSummaryState(mergeUnreadState(base, incoming), incoming), incoming);
@@ -2027,9 +2091,9 @@ ${dialogText}
     renderSessionList();
 
     if (writeBack) {
+      const cloudIds = new Set(cloudSessions.map(s => s.id));
       merged.forEach(session => {
-        const cloud = cloudSessions.find(s => s.id === session.id);
-        if (!cloud || isNewerSession(session, cloud)) {
+        if (!cloudIds.has(session.id) && !sessionNeedsCloudHydration(session)) {
           markSessionPendingSync(session.id);
           sbUpsertSession(session).then(ok => {
             if (ok) clearSessionPendingSync(session.id);
@@ -2050,7 +2114,7 @@ ${dialogText}
     if (cloudSyncBtn) cloudSyncBtn.disabled = true;
     setSessionSyncState({ state: 'syncing', local: getSessions().length, pending: getPendingSessionSyncIds().length });
     try {
-      const ok = await syncSessionsFromCloud({ writeBack: true, refreshCurrent: true });
+      const ok = await syncSessionsFromCloud({ writeBack: false, refreshCurrent: true });
       if (ok) await uploadAllLocalSessionsToCloud();
     } finally {
       if (cloudSyncBtn) cloudSyncBtn.disabled = false;
@@ -2293,7 +2357,7 @@ ${dialogText}
     if (localSessions.length > 0) loadSession(localSessions[0].id);
 
     // 会话同步优先启动，不能被固定文件或记忆库的网络请求拖住。
-    syncSessionsFromCloud({ writeBack: true }).catch(() => {});
+    syncSessionsFromCloud({ writeBack: false }).catch(() => {});
 
     // 配置和资料库放到后台加载，先保证手机/电脑新聊天能互相看见。
     syncConfigFromCloud().catch(() => {});
@@ -2304,10 +2368,10 @@ ${dialogText}
     getEnvContext();
 
     // 再拉一次兜底。手机和电脑各自有 localStorage，必须以云端为准合并。
-    setTimeout(() => syncSessionsFromCloud({ writeBack: true }).catch(() => {}), 2500);
-    setInterval(() => syncSessionsFromCloud({ writeBack: true, refreshCurrent: document.visibilityState === 'visible' }), 20000);
+    setTimeout(() => syncSessionsFromCloud({ writeBack: false }).catch(() => {}), 2500);
+    setInterval(() => syncSessionsFromCloud({ writeBack: false, refreshCurrent: document.visibilityState === 'visible' }), 120000);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') syncSessionsFromCloud({ writeBack: true });
+      if (document.visibilityState === 'visible') syncSessionsFromCloud({ writeBack: false });
       else flushPendingSessionSync();
     });
     window.addEventListener('pagehide', () => { flushPendingSessionSync(); });
@@ -2640,6 +2704,35 @@ ${summary}`;
     });
   }
 
+  function renderCloudSessionLoading(session) {
+    chatArea.innerHTML = '';
+    const loading = document.createElement('div');
+    loading.className = 'empty-state';
+    loading.textContent = `正在加载「${session?.title || '这条对话'}」…`;
+    chatArea.appendChild(loading);
+  }
+
+  async function hydrateFullSessionFromCloud(id) {
+    const cloudSession = await sbFetchSessionById(id);
+    if (!cloudSession?.id) return null;
+    const sessions = getSessions();
+    const current = sessions.find(s => s.id === id);
+    const fullSession = {
+      ...cloudSession,
+      _cloud_meta_only: false,
+      _needs_cloud_load: false,
+      _cloud_message_count: Array.isArray(cloudSession.messages) ? cloudSession.messages.length : 0,
+      _cloud_last_timestamp: sessionSortValue(cloudSession),
+    };
+    const mergedSession = mergeSessionState(current, fullSession);
+    const nextSessions = mergeSessions(
+      sessions.filter(s => s.id !== id),
+      [{ ...mergedSession, _needs_cloud_load: false, _cloud_meta_only: false }]
+    );
+    saveSessions(nextSessions);
+    return nextSessions.find(s => s.id === id) || mergedSession;
+  }
+
   function loadSession(id) {
     currentView = 'chat';
     currentSessionId = id;
@@ -2647,7 +2740,25 @@ ${summary}`;
     hydrateSessionSummary(id).catch(() => {});
     const session = getSession(id);
     if (!session) return;
-    renderSessionMessages(session, Math.max(0, (session.messages || []).length - MESSAGE_BATCH_SIZE), false);
+    const localMessages = Array.isArray(session.messages) ? session.messages : [];
+    if (sessionNeedsCloudHydration(session)) {
+      if (localMessages.length === 0) renderCloudSessionLoading(session);
+      hydrateFullSessionFromCloud(id).then(fullSession => {
+        if (!fullSession || currentSessionId !== id || isLoading) return;
+        const messages = Array.isArray(fullSession.messages) ? fullSession.messages : [];
+        renderSessionMessages(fullSession, Math.max(0, messages.length - MESSAGE_BATCH_SIZE), false);
+        renderSessionList();
+        renderLibraryNav();
+      }).catch(() => {
+        if (currentSessionId === id && localMessages.length === 0) renderSessionMessages(session, 0, false);
+      });
+      if (localMessages.length === 0) {
+        renderSessionList();
+        renderLibraryNav();
+        return;
+      }
+    }
+    renderSessionMessages(session, Math.max(0, localMessages.length - MESSAGE_BATCH_SIZE), false);
     renderSessionList();
     renderLibraryNav();
   }

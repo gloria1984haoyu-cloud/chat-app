@@ -7,6 +7,7 @@ function sendJson(res, status, data) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-store');
   res.end(JSON.stringify(data));
 }
 
@@ -36,6 +37,20 @@ function safeSession(session) {
   };
 }
 
+function compactSession(session) {
+  const messages = Array.isArray(session?.messages) ? session.messages : [];
+  const last = messages[messages.length - 1] || {};
+  return {
+    id: session?.id,
+    title: session?.title || '新对话',
+    created_at: Number(session?.created_at || session?.id || Date.now()),
+    _cloud_meta_only: true,
+    _needs_cloud_load: messages.length > 0,
+    _cloud_message_count: messages.length,
+    _cloud_last_timestamp: Number(last.timestamp || session?.created_at || session?.id || 0),
+  };
+}
+
 async function proxyError(upstream, res) {
   const text = await upstream.text().catch(() => '');
   sendJson(res, upstream.status || 502, {
@@ -52,12 +67,19 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const upstream = await fetch(`${SB_URL}/rest/v1/sessions?select=*&order=created_at.desc`, {
+      const id = req.query?.id;
+      const compact = req.query?.compact === '1' || req.query?.compact === 'true';
+      const path = id
+        ? `sessions?id=eq.${encodeURIComponent(id)}&select=*`
+        : 'sessions?select=*&order=created_at.desc';
+      const upstream = await fetch(`${SB_URL}/rest/v1/${path}`, {
         headers: sbHeaders(),
       });
       if (!upstream.ok) return proxyError(upstream, res);
       const data = await upstream.json();
-      return sendJson(res, 200, Array.isArray(data) ? data : []);
+      const rows = Array.isArray(data) ? data : [];
+      if (id) return sendJson(res, 200, rows[0] || null);
+      return sendJson(res, 200, compact ? rows.map(compactSession) : rows);
     } catch (e) {
       return sendJson(res, 502, { error: { message: e.message || '会话云同步失败' } });
     }

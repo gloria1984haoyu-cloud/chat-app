@@ -1,4 +1,4 @@
-const CACHE = 'lucian-v22-network-first-doc';
+const CACHE = 'lucian-v23-mobile-light-sync';
 
 self.addEventListener('install', e => {
   e.waitUntil(
