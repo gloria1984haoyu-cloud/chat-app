@@ -100,6 +100,9 @@ export default async function handler(req, res) {
     const upstreamBody = { ...body };
 
     if (upstreamBody.stream) {
+      const upstreamBodyForProvider = { ...upstreamBody };
+      delete upstreamBodyForProvider.stream;
+
       res.statusCode = 200;
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -116,7 +119,7 @@ export default async function handler(req, res) {
             'x-api-key': String(apiKey),
             'anthropic-version': String(req.headers['anthropic-version'] || '2023-06-01'),
           },
-          body: JSON.stringify(upstreamBody),
+          body: JSON.stringify(upstreamBodyForProvider),
           signal: ctrl.signal,
         });
 
