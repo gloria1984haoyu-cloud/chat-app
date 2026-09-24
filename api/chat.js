@@ -1,4 +1,4 @@
-export const config = { regions: ['iad1'], maxDuration: 60 };
+export const config = { regions: ['hkg1'], maxDuration: 60 };
 
 function sendJson(res, status, payload) {
   res.statusCode = status;
@@ -38,7 +38,19 @@ function writeJsonAsSse(res, payload) {
     writeSseError(res, payload.error.message || '上游请求失败', payload.error);
     return;
   }
+  if (payload?.message && (payload?.code || payload?.type || payload?.status)) {
+    writeSseError(res, payload.message, {
+      code: payload.code,
+      type: payload.type,
+      status: payload.status,
+    });
+    return;
+  }
   const blocks = Array.isArray(payload?.content) ? payload.content : [];
+  if (blocks.length === 0 && payload?.message) {
+    writeSseError(res, payload.message, payload);
+    return;
+  }
   blocks.forEach((block, index) => {
     writeSse(res, {
       type: 'content_block_start',
