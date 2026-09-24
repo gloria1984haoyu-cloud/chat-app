@@ -19,6 +19,36 @@ function cleanText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 800);
 }
 
+function writeSse(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function writeSseError(res, message, extra = {}) {
+  writeSse(res, {
+    type: 'error',
+    error: {
+      message,
+      ...extra,
+    },
+  });
+}
+
+function writeJsonAsSse(res, payload) {
+  if (payload?.error) {
+    writeSseError(res, payload.error.message || '上游请求失败', payload.error);
+    return;
+  }
+  const blocks = Array.isArray(payload?.content) ? payload.content : [];
+  blocks.forEach((block, index) => {
+    writeSse(res, {
+      type: 'content_block_start',
+      index,
+      content_block: block,
+    });
+  });
+  writeSse(res, { type: 'message_stop' });
+}
+
 async function readJsonBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
   if (typeof req.body === 'string') return JSON.parse(req.body || '{}');
@@ -57,6 +87,67 @@ export default async function handler(req, res) {
 
     const upstreamBody = { ...body };
 
+    if (upstreamBody.stream) {
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.write(': connected\n\n');
+
+      try {
+        const upstream = await fetch(`${baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${String(apiKey)}`,
+            'x-api-key': String(apiKey),
+            'anthropic-version': String(req.headers['anthropic-version'] || '2023-06-01'),
+          },
+          body: JSON.stringify(upstreamBody),
+          signal: ctrl.signal,
+        });
+
+        const contentType = upstream.headers.get('Content-Type') || '';
+        if (upstream.body && contentType.includes('text/event-stream')) {
+          const reader = upstream.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(Buffer.from(value));
+          }
+          return res.end();
+        }
+
+        const text = await upstream.text();
+        const trimmed = text.trim();
+        const isJson = contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[');
+        if (!isJson) {
+          writeSseError(res, `上游返回了非 JSON 内容 (${upstream.status})：${cleanText(text) || '空响应'}`, {
+            upstream_status: upstream.status,
+            upstream_content_type: contentType,
+          });
+          return res.end();
+        }
+
+        try {
+          writeJsonAsSse(res, JSON.parse(text));
+        } catch {
+          writeSseError(res, `返回内容不是 JSON：${cleanText(text) || '空响应'}`, {
+            upstream_status: upstream.status,
+            upstream_content_type: contentType,
+          });
+        }
+        return res.end();
+      } catch (e) {
+        const message = e.name === 'AbortError'
+          ? '请求超过 55 秒，上游没有返回'
+          : e.message || '代理请求失败';
+        writeSseError(res, message);
+        return res.end();
+      }
+    }
+
     const upstream = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       headers: {
@@ -70,22 +161,6 @@ export default async function handler(req, res) {
     });
 
     const contentType = upstream.headers.get('Content-Type') || '';
-
-    if (upstreamBody.stream && upstream.body && contentType.includes('text/event-stream')) {
-      res.statusCode = upstream.status;
-      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, no-transform');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-
-      const reader = upstream.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(Buffer.from(value));
-      }
-      return res.end();
-    }
 
     const text = await upstream.text();
     const trimmed = text.trim();
