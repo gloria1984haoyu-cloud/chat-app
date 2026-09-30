@@ -33,6 +33,35 @@ function writeSseError(res, message, extra = {}) {
   });
 }
 
+function collectText(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(collectText).filter(Boolean).join('\n\n');
+  if (typeof value === 'object') {
+    return collectText(value.text || value.content || value.message || value.output_text || value.summary);
+  }
+  return '';
+}
+
+function normalizeContentBlocks(payload) {
+  if (Array.isArray(payload?.content)) return payload.content;
+  const directText = collectText(payload?.content || payload?.text || payload?.output_text);
+  if (directText) return [{ type: 'text', text: directText }];
+
+  const choice = Array.isArray(payload?.choices) ? payload.choices[0] : null;
+  const choiceText = collectText(choice?.message?.content || choice?.delta?.content || choice?.text);
+  if (choiceText) return [{ type: 'text', text: choiceText }];
+
+  const outputItems = Array.isArray(payload?.output) ? payload.output : [];
+  const outputText = outputItems
+    .map(item => collectText(item?.content || item?.text || item))
+    .filter(Boolean)
+    .join('\n\n');
+  if (outputText) return [{ type: 'text', text: outputText }];
+
+  return [];
+}
+
 function writeJsonAsSse(res, payload) {
   if (payload?.error) {
     writeSseError(res, payload.error.message || '上游请求失败', payload.error);
@@ -46,9 +75,15 @@ function writeJsonAsSse(res, payload) {
     });
     return;
   }
-  const blocks = Array.isArray(payload?.content) ? payload.content : [];
+  const blocks = normalizeContentBlocks(payload);
   if (blocks.length === 0 && payload?.message) {
     writeSseError(res, payload.message, payload);
+    return;
+  }
+  if (blocks.length === 0) {
+    writeSseError(res, '上游返回了空内容', {
+      upstream_shape: Object.keys(payload || {}).slice(0, 12).join(','),
+    });
     return;
   }
   blocks.forEach((block, index) => {
@@ -92,6 +127,7 @@ export default async function handler(req, res) {
     const body = await readJsonBody(req);
     const apiKey = req.headers['x-api-key'];
     const baseUrl = normalizeBaseUrl(req.headers['x-base-url']);
+    const startedAt = Date.now();
 
     if (!apiKey) {
       return sendJson(res, 401, { error: { message: '缺少 API Key' } });
@@ -124,6 +160,14 @@ export default async function handler(req, res) {
         });
 
         const contentType = upstream.headers.get('Content-Type') || '';
+        console.log(JSON.stringify({
+          event: 'chat_upstream_response',
+          stream: true,
+          status: upstream.status,
+          content_type: contentType,
+          model: upstreamBodyForProvider.model,
+          elapsed_ms: Date.now() - startedAt,
+        }));
         if (upstream.body && contentType.includes('text/event-stream')) {
           const reader = upstream.body.getReader();
           while (true) {
@@ -135,6 +179,14 @@ export default async function handler(req, res) {
         }
 
         const text = await upstream.text();
+        console.log(JSON.stringify({
+          event: 'chat_upstream_body',
+          stream: true,
+          status: upstream.status,
+          content_type: contentType,
+          body_chars: text.length,
+          elapsed_ms: Date.now() - startedAt,
+        }));
         const trimmed = text.trim();
         const isJson = contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[');
         if (!isJson) {
@@ -158,6 +210,13 @@ export default async function handler(req, res) {
         const message = e.name === 'AbortError'
           ? '请求超过 55 秒，上游没有返回'
           : e.message || '代理请求失败';
+        console.log(JSON.stringify({
+          event: 'chat_upstream_error',
+          stream: true,
+          name: e.name || '',
+          message,
+          elapsed_ms: Date.now() - startedAt,
+        }));
         writeSseError(res, message);
         return res.end();
       }
@@ -176,8 +235,24 @@ export default async function handler(req, res) {
     });
 
     const contentType = upstream.headers.get('Content-Type') || '';
+    console.log(JSON.stringify({
+      event: 'chat_upstream_response',
+      stream: false,
+      status: upstream.status,
+      content_type: contentType,
+      model: upstreamBody.model,
+      elapsed_ms: Date.now() - startedAt,
+    }));
 
     const text = await upstream.text();
+    console.log(JSON.stringify({
+      event: 'chat_upstream_body',
+      stream: false,
+      status: upstream.status,
+      content_type: contentType,
+      body_chars: text.length,
+      elapsed_ms: Date.now() - startedAt,
+    }));
     const trimmed = text.trim();
     const isJson = contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[');
 
@@ -199,6 +274,11 @@ export default async function handler(req, res) {
     const message = e.name === 'AbortError'
       ? '请求超过 55 秒，上游没有返回'
       : e.message || '代理请求失败';
+    console.log(JSON.stringify({
+      event: 'chat_handler_error',
+      name: e.name || '',
+      message,
+    }));
     return sendJson(res, 502, { error: { message } });
   } finally {
     clearTimeout(timer);
