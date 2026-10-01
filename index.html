@@ -1071,26 +1071,26 @@
   const CLOUD_CONFIG_FILE_NAME = '.lucian-cloud-config.json';
   const PUSH_SUBSCRIPTIONS_FILE_ID = '__lucian_push_subscriptions__';
   const SESSION_SUMMARY_FILE_PREFIX = '__lucian_session_summary__:';
-  const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
-  const APP_VERSION = '2026-09-30-chat-shape-compat';
+  const DEFAULT_MODEL = 'claude-opus-4-5-20251101';
+  const APP_VERSION = '2026-10-02-opus-stable-default';
   const MODEL_OPTIONS = [
     {
       value: 'claude-sonnet-4-5-20250929',
       label: 'Sonnet 4.5',
-      tag: '日常推荐',
-      hint: '当前实测可正常回复，也能返回 Thought process。',
-      use: '平时聊天最推荐，适合大多数日常对话。',
-      thinkingNote: '实测会返回 thinking block，前端可以展示 Thought process。',
+      tag: '线路不稳',
+      hint: '当前中转站线路连续 55 秒无返回，暂不推荐。',
+      use: '等中转站恢复后再用。',
+      thinkingNote: '理论上可返回 thinking block，但当前线路超时。',
       controlNote: '低 / 中 / 高有效，会影响 thinking token。',
-      advice: '日常使用先选它；想要更稳的思考链，用 Opus 4.5 Thinking。',
+      advice: '现在先不要选它；日志里 Opus 4.5 Thinking 可正常返回。',
       thinking: 'budget',
     },
     {
       value: 'claude-opus-4-5-20251101',
       label: 'Opus 4.5 Thinking',
-      tag: '思考最稳',
-      hint: '当前实测最稳返回 Thought process，低 / 中 / 高有效。',
-      use: '最推荐用来看 Thought process。',
+      tag: '当前可用',
+      hint: '当前线上日志确认可正常回复，也能返回 Thought process。',
+      use: '当前主力推荐，先用它保证能聊。',
       thinkingNote: '实测会返回 thinking block，前端可以稳定展示 Thought process。',
       controlNote: '低 / 中 / 高有效，会影响 thinking token。',
       advice: '想看思考链就选它。',
